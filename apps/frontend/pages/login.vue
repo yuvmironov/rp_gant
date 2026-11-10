@@ -100,7 +100,7 @@ async function requestReset() {
   try {
     await api('/auth/password/forgot', { method: 'POST', body: { email: email.value } });
     showReset.value = true;
-    message.value = 'Ссылка отправлена в Mailpit.';
+    message.value = 'Если адрес зарегистрирован, инструкция по сбросу пароля будет отправлена на него.';
   } catch (reason) {
     error.value = reason.message;
   }
@@ -226,7 +226,6 @@ onMounted(async () => {
           <button class="btn btn-primary btn-lg btn-block" type="submit">Обновить пароль</button>
         </form>
 
-        <p class="hint">Локальный администратор: admin@rp-gant.local</p>
       </div>
     </section>
   </main>
@@ -250,7 +249,6 @@ onMounted(async () => {
 .check:before { content: none; }
 .auth-point .check { color: #fff; font-weight: 700; }
 .message, .error { margin-top: 16px; }
-.hint { margin-top: 18px; }
 @media (max-width: 900px) {
   .auth-layout { grid-template-columns: 1fr; }
   .auth-layout .auth-brand, .auth-panel { padding: 32px 24px; }
