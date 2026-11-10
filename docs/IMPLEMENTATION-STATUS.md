@@ -16,6 +16,7 @@
 | Область | Состояние в репозитории | Основные источники |
 |---|---|---|
 | REST API | OpenAPI описывает 76 paths и 99 operations. Gateway имеет маршруты auth, users, projects/diagrams, audit, notifications, Telegram и admin. | `openapi/openapi.yaml`, `apps/api-gateway/src/`, `apps/api-gateway/README.md` |
+| Auth и сессии | Лимит — две логически активные сессии: обычная действует 10 минут idle / 1 час absolute; remember-токен — 7 дней idle / 30 дней absolute. Истёкшие слоты не учитываются; миграция `0002_session_idle_expiration.sql` отзывает уже истёкшие записи. | `apps/user-service/src/auth.js`, `db/migrations/user_access/0002_session_idle_expiration.sql` |
 | REST/gRPC mapping | В `contracts/rest-grpc-map.yaml` 97 записей. `health` и `getSyncToken` не имеют gRPC mapping; mapping не должен считаться полным покрытием каждого OpenAPI operation. | `contracts/rest-grpc-map.yaml`, `tools/check-contracts.mjs` |
 | gRPC | 6 proto-файлов: User, Project, Notification, Audit, common и events. User/Project доступны Gateway по gRPC; Gateway вызывает Notification и Audit через внутренний HTTP-клиент. | `proto/rpgant/`, `apps/api-gateway/src/*-client.js`, README сервисов |
 | События | Каталог содержит 68 событий: 30 `implemented`, 38 `planned`. JSON Schema реального envelope использует snake_case; в `payloads.schema.json` проверка ожидает 79 определений payload. | `events/event-types.json`, `events/schemas/`, `tools/check-contracts.mjs` |
@@ -41,6 +42,7 @@
 9. **Telegram webhook не реализован.** Есть API привязки Telegram и отправка сообщений из delivery worker, но отдельный входящий Bot/webhook route не обнаружен; локальный webhook в P0 runbook является плановым.
 10. **Импорт заменяет содержимое выбранной диаграммы.** Это уже поведение кода, хотя ADR-011 не оформлен как принятое решение. В P0-матрице и ADR следует различать реализованное поведение и формально согласованное продуктовое решение.
 11. **Однофайловая постановка Ганта — legacy.** `docs/requirements/system/SMART_OATI_диаграмма_Ганта_системная_постановка.md` описывает HTML/localStorage приложение без сервера; текущий серверный проект находится в `apps/`.
+12. **Remember me не подключён в Nuxt-форме входа.** Gateway и User Service поддерживают `rememberMe: true`, но `apps/frontend/pages/login.vue` сейчас не передаёт этот параметр; вход из текущей формы использует обычные сроки сессии.
 
 ## Автоматические проверки контрактов
 

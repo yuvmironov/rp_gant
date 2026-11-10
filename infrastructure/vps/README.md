@@ -73,11 +73,36 @@ WebSocket `sync.rp-gant.ru` должен отвечать `101 Switching Protoco
 
 ## Обновление
 
+Перед применением изменений БД сделайте backup. На VPS выполните:
+
 ```bash
+set -euo pipefail
 cd /opt/rp-gant
 git pull --ff-only
-docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml up -d --build
+
+umask 077
+compose=(docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml)
+backup_dir=/opt/rp-gant-backups
+mkdir -p "$backup_dir"
+pg_user="$("${compose[@]}" exec -T postgres printenv POSTGRES_USER)"
+backup="$backup_dir/rp-gant-$(date +%Y%m%d-%H%M%S).sql"
+"${compose[@]}" exec -T postgres pg_dumpall -U "$pg_user" > "$backup"
+test -s "$backup"
+
+# Повторно применяет идемпотентные миграции и seed, включая новые миграции.
+"${compose[@]}" run --rm db-init
+"${compose[@]}" up -d --build
+"${compose[@]}" ps
 ```
+
+Если изменение затрагивает только `user-service`, после `db-init` можно пересобрать только его:
+
+```bash
+docker compose --env-file infrastructure/vps/.env \
+  -f infrastructure/vps/docker-compose.yml up -d --build --no-deps user-service
+```
+
+Не используйте `down -v` для обычного обновления: это удалит volumes с данными.
 
 ## Ограничения
 
