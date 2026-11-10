@@ -28,7 +28,7 @@
 - `GET /api/v1/roles`, `GET /api/v1/permissions`;
 - `GET /api/v1/settings`, `PUT /api/v1/settings`.
 
-`POST /api/v1/auth/login` принимает необязательный `rememberMe: true`. `GET /api/v1/auth/session` возвращает `401`, если cookie отсутствует или сессия отозвана/истекла; срок проверяется при запросе. Idle- и абсолютные TTL, remember-токены и лимит активных сессий описаны в [README User & Access Service](../user-service/README.md).
+`POST /api/v1/auth/login` принимает `rememberMe: boolean`. Nuxt-форма передаёт состояние чекбокса; при отсутствии обычной сессии она пробует `POST /api/v1/auth/restore` и продолжает вход, если remember-токен ещё действителен. `GET /api/v1/auth/session` возвращает `401`, если cookie отсутствует или сессия отозвана/истекла; срок проверяется при запросе. Idle- и абсолютные TTL и лимит активных сессий описаны в [README User & Access Service](../user-service/README.md).
 
 ### Участники и приглашения
 
