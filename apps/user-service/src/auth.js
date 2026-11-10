@@ -8,6 +8,14 @@ const SESSION_ABSOLUTE_MS = 60 * 60 * 1000;
 const SESSION_IDLE_MS = 10 * 60 * 1000;
 const REMEMBER_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000;
 const REMEMBER_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+const ACTIVE_SESSION_PREDICATE = `(
+  (absolute_expires_at > now() AND idle_expires_at > now())
+  OR (
+    remember_token_hash IS NOT NULL
+    AND remember_absolute_expires_at > now()
+    AND remember_idle_expires_at > now()
+  )
+)`;
 const EMAIL_VERIFICATION_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_MS = 60 * 60 * 1000;
 const INVITATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -587,6 +595,15 @@ export function createUserImplementation({
           callback(grpcError(status.PERMISSION_DENIED, 'email_not_verified'));
           return;
         }
+
+        await client.query(
+          `UPDATE access.user_sessions
+           SET revoked_at = now()
+           WHERE user_id = $1
+             AND revoked_at IS NULL
+             AND NOT ${ACTIVE_SESSION_PREDICATE}`,
+          [user.id],
+        );
 
         const sessionToken = randomToken();
         const rememberToken = remember ? randomToken() : null;
@@ -1635,6 +1652,7 @@ export function createUserImplementation({
            JOIN access.users u ON u.id = s.user_id
            WHERE s.remember_token_hash = $1 AND s.revoked_at IS NULL
              AND s.remember_absolute_expires_at > now()
+             AND s.remember_idle_expires_at > now()
            FOR UPDATE`,
           [hashToken(rememberToken)],
         );
@@ -1657,8 +1675,16 @@ export function createUserImplementation({
         const now = Date.now();
         const absoluteExpiresAt = new Date(now + SESSION_ABSOLUTE_MS);
         const idleExpiresAt = new Date(now + SESSION_IDLE_MS);
+        const rememberIdleExpiresAt = new Date(
+          Math.min(
+            now + REMEMBER_IDLE_MS,
+            new Date(session.remember_absolute_expires_at).getTime(),
+          ),
+        );
         await client.query(
-          `UPDATE access.user_sessions SET remember_token_hash = NULL WHERE id = $1`,
+          `UPDATE access.user_sessions
+           SET revoked_at = now(), remember_token_hash = NULL
+           WHERE id = $1`,
           [session.id],
         );
         const created = await client.query(
@@ -1675,7 +1701,7 @@ export function createUserImplementation({
             idleExpiresAt,
             hashToken(rememberToken),
             session.remember_absolute_expires_at,
-            session.remember_idle_expires_at,
+            rememberIdleExpiresAt,
             String(call.request.user_agent ?? '') || null,
             String(call.request.client_ip ?? '') || null,
           ],
@@ -2386,6 +2412,20 @@ export function createUserImplementation({
           new Date(session.absolute_expires_at) <= now ||
           new Date(session.idle_expires_at) <= now
         ) {
+          const hasActiveRememberToken =
+            Boolean(session.remember_token_hash) &&
+            new Date(session.remember_absolute_expires_at ?? 0) > now &&
+            new Date(session.remember_idle_expires_at ?? 0) > now;
+          if (!hasActiveRememberToken) {
+            await db
+              .query(
+                `UPDATE access.user_sessions
+                 SET revoked_at = now()
+                 WHERE id = $1 AND revoked_at IS NULL`,
+                [session.id],
+              )
+              .catch(() => {});
+          }
           callback(grpcError(status.UNAUTHENTICATED, 'session_expired'));
           return;
         }
@@ -2400,11 +2440,20 @@ export function createUserImplementation({
           idleExpiresAt = new Date(
             Math.min(now.getTime() + idleMs, new Date(session.absolute_expires_at).getTime()),
           );
+          const rememberAbsoluteExpiresAt = new Date(
+            session.remember_absolute_expires_at ?? Number.NaN,
+          ).getTime();
+          const rememberIdleExpiresAt =
+            session.remember_token_hash && Number.isFinite(rememberAbsoluteExpiresAt)
+              ? new Date(Math.min(now.getTime() + REMEMBER_IDLE_MS, rememberAbsoluteExpiresAt))
+              : null;
           await db.query(
             `UPDATE access.user_sessions
-             SET idle_expires_at = $1, last_seen_at = now()
-             WHERE id = $2`,
-            [idleExpiresAt, session.id],
+             SET idle_expires_at = $1,
+                 remember_idle_expires_at = $2::timestamptz,
+                 last_seen_at = now()
+             WHERE id = $3`,
+            [idleExpiresAt, rememberIdleExpiresAt, session.id],
           );
         }
 
@@ -2434,7 +2483,7 @@ export function createUserImplementation({
           `SELECT * FROM access.user_sessions
            WHERE user_id = $1
              AND revoked_at IS NULL
-             AND (absolute_expires_at > now() OR remember_absolute_expires_at > now())
+             AND ${ACTIVE_SESSION_PREDICATE}
            ORDER BY last_seen_at DESC`,
           [userId],
         );
