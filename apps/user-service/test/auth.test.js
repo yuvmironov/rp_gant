@@ -49,6 +49,44 @@ describe('session expiration', () => {
     expect(queries.some(({ sql }) => sql.includes('SET revoked_at = now()'))).toBe(true);
   });
 
+  it('updates non-remembered sessions with a typed null remember expiry', async () => {
+    let update;
+    const db = {
+      async query(sql, params) {
+        if (sql.includes('SELECT s.*, u.status AS user_status')) {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                id: 'regular-session',
+                user_id: 'user-1',
+                user_status: 'active',
+                absolute_expires_at: new Date(Date.now() + 60 * 60 * 1000),
+                idle_expires_at: new Date(Date.now() + 5 * 60 * 1000),
+                remember_token_hash: null,
+                remember_absolute_expires_at: null,
+                remember_idle_expires_at: null,
+              },
+            ],
+          };
+        }
+        if (sql.includes('UPDATE access.user_sessions')) update = { sql, params };
+        return { rowCount: 1, rows: [] };
+      },
+    };
+    const service = createUserImplementation({ db, mailer: {} });
+
+    const { error, response } = await invoke(service.ValidateSession, {
+      session_token: 'active-token',
+      extend_idle: true,
+    });
+
+    expect(error).toBeNull();
+    expect(response.user_id).toBe('user-1');
+    expect(update.params[1]).toBeNull();
+    expect(update.sql).toContain('$2::timestamptz');
+  });
+
   it('extends remembered-session idle expiry with authenticated activity', async () => {
     const updates = [];
     const absoluteExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);

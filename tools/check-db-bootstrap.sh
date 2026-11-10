@@ -144,6 +144,14 @@ BEGIN
   END IF;
 END;
 $$;
+PREPARE session_idle_update(timestamptz, timestamptz, uuid) AS
+  UPDATE access.user_sessions
+  SET idle_expires_at = $1,
+      remember_idle_expires_at = $2::timestamptz,
+      last_seen_at = now()
+  WHERE id = $3;
+EXECUTE session_idle_update(now(), NULL, gen_random_uuid());
+DEALLOCATE session_idle_update;
 ROLLBACK;
 SQL
 

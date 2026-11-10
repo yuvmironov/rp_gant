@@ -2450,10 +2450,7 @@ export function createUserImplementation({
           await db.query(
             `UPDATE access.user_sessions
              SET idle_expires_at = $1,
-                 remember_idle_expires_at = CASE
-                   WHEN remember_token_hash IS NOT NULL THEN $2
-                   ELSE NULL
-                 END,
+                 remember_idle_expires_at = $2::timestamptz,
                  last_seen_at = now()
              WHERE id = $3`,
             [idleExpiresAt, rememberIdleExpiresAt, session.id],
