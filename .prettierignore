@@ -12,6 +12,7 @@ frontend/design/
 *.yml
 *.json
 notifications/templates/
+docs/requirements/
 
 apps/frontend/
 infrastructure/helm/
