@@ -143,8 +143,9 @@ tools/                 # проверки контрактов
 
 - [`docs/MIGRATION-rp-gant.md`](docs/MIGRATION-rp-gant.md) — переход с `smart-oati` на `rp-gant`, перенос БД, volumes, Helm и CI.
 - [`docs/SPEC-STATUS.md`](docs/SPEC-STATUS.md) — состояние REST/gRPC/events/WebSocket-спецификаций.
-- [`docs/requirements/README.md`](docs/requirements/README.md) — исходные бизнес- и системные постановки, P0-пакет и changelog.
-- [`infrastructure/vps/README.md`](infrastructure/vps/README.md) — production-развёртывание на одном VPS за Jino-прокси.
+- [`changelog.md`](changelog.md) — история изменений приложения и реализованных исправлений.
+- [`docs/requirements/README.md`](docs/requirements/README.md) — исходные бизнес- и системные постановки и P0-пакет; changelog требований находится в `docs/requirements/changelog.md`.
+- [`infrastructure/vps/README.md`](infrastructure/vps/README.md) — production-развёртывание и обновление одного VPS за Jino-прокси.
 
 ## Статус
 
