@@ -2,6 +2,7 @@
 const tab = ref('login');
 const email = ref('');
 const password = ref('');
+const rememberMe = ref(true);
 const lastName = ref('');
 const firstName = ref('');
 const error = ref('');
@@ -43,7 +44,12 @@ async function api(path, options = {}) {
     cache: 'no-store',
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail ?? response.statusText);
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const error = new Error(problem.detail ?? response.statusText);
+    error.status = response.status;
+    throw error;
+  }
   return response.status === 204 ? null : response.json();
 }
 
@@ -63,7 +69,7 @@ async function submitLogin() {
   try {
     await api('/auth/login', {
       method: 'POST',
-      body: { email: email.value, password: password.value },
+      body: { email: email.value, password: password.value, rememberMe: rememberMe.value },
     });
     await finishLogin();
   } catch (reason) {
@@ -150,9 +156,17 @@ onMounted(async () => {
   if (verify || reset || invitation) window.history.replaceState({}, '', '/login');
   try {
     await api('/auth/session');
-    window.location.href = '/projects';
+    await finishLogin();
+    return;
+  } catch (reason) {
+    if (reason.status !== 401) return;
+  }
+
+  try {
+    await api('/auth/restore', { method: 'POST' });
+    await finishLogin();
   } catch {
-    // Stay on the login page.
+    // No valid access or remember session; stay on the login page.
   }
 });
 </script>
@@ -197,7 +211,10 @@ onMounted(async () => {
             <input id="login-password" v-model="password" class="input" name="password" type="password" autocomplete="current-password" required />
           </div>
           <div class="auth-row">
-            <label class="checkbox-line"><input type="checkbox" checked /> Запомнить меня</label>
+            <label class="checkbox-line" for="remember-me">
+              <input id="remember-me" v-model="rememberMe" name="rememberMe" type="checkbox" />
+              Запомнить меня
+            </label>
             <button class="link-button" type="button" @click="requestReset">Забыли пароль?</button>
           </div>
           <button class="btn btn-primary btn-lg btn-block auth-submit" type="submit">Войти</button>
