@@ -75,7 +75,7 @@ Audit Service — централизованный неизменяемый жу
 | Runtime | Node.js 22 LTS |
 | Язык | JavaScript, без TypeScript |
 | API | gRPC/protobuf |
-| БД | PostgreSQL 16 |
+| БД | проектная модель PostgreSQL 16; local Compose PostgreSQL 17; production — не зафиксирован |
 | Схемы | `audit`, `events`, `analytics`, `ext` |
 | Потребление | брокер событий |
 | Партиционирование | по месяцам |

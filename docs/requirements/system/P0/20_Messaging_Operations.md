@@ -2,8 +2,8 @@
 ## SMART OATI
 
 **Версия:** 1.0  
-**Дата:** 2026-10-28  
-**Статус:** draft for approval  
+**Дата исходного документа:** 2026-10-28
+**Статус:** проектный baseline; текущие настройки и расхождения см. `docs/IMPLEMENTATION-STATUS.md`.
 **Область:** Kafka, topics, partitions, outbox/inbox, retry, DLQ, schema compatibility, replay и monitoring  
 **Связанные документы:** `P0/02_Контракт_событий.md`, `P0/11_Полные_payload_событий.md`, `P0/15_ADR_Package.md` (ADR-001, ADR-006)
 
@@ -11,11 +11,13 @@
 
 ## 1. Решение
 
-- Брокер: **Kafka** во всех окружениях.
-- Local: Kafka KRaft.
-- Staging/prod: Yandex Managed Kafka.
-- MVP: один topic `smartoati.events`.
-- Маршрутизация — по `eventType` в envelope; consumers фильтруют свои типы.
+> В local Compose topic — `rp_gant.events`; приложения имеют fallback `rpgant.events`, если `KAFKA_TOPIC` не задан. Compose задаёт переменную. DLQ-топики ниже описаны как операционная цель и не создаются текущим local init автоматически.
+
+- Целевой брокер по ADR-001: **Kafka** во всех окружениях.
+- Local: Kafka KRaft (используется в Compose).
+- Staging/prod: Yandex Managed Kafka — целевой вариант; развёртывание не подтверждено репозиторием.
+- Local Compose: один topic `rp_gant.events`.
+- Маршрутизация по фактическому envelope-полю `event_type`; consumers фильтруют свои типы.
 - Разделение на domain topics — только после доказанной необходимости и ADR.
 
 ---
@@ -24,7 +26,7 @@
 
 | Параметр | Local | Staging/prod |
 |---|---|---|
-| Topic | `smartoati.events` | `smartoati.events` |
+| Topic | `rp_gant.events` | `rp_gant.events` |
 | Partitions | 6 | ≥ 6, по нагрузке |
 | Replication factor | 1 | ≥ 3 |
 | Min in-sync replicas | 1 | 2 |
@@ -36,9 +38,9 @@
 DLQ/error topics:
 
 ```text
-smartoati.events.dlq.notification
-smartoati.events.dlq.audit
-smartoati.events.dlq.sync
+rp_gant.events.dlq.notification
+rp_gant.events.dlq.audit
+rp_gant.events.dlq.sync
 ```
 
 ---
@@ -219,7 +221,7 @@ Partition key:
 ## 13. Критерии приемки
 
 1. Один topic и стабильный envelope.
-2. Все 64 события проходят schema validation.
+2. Все события из актуального `events/event-types.json` проходят schema validation; число типов не задаётся в тексте критерия.
 3. Outbox/inbox реализованы.
 4. Retry/DLQ работают.
 5. Replay идемпотентен.

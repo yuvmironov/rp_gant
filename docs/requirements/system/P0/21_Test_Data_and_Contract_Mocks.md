@@ -164,7 +164,7 @@
 
 Проверять:
 
-- все 96 OpenAPI operations имеют mapping;
+- текущий mapping содержит 97 записей; `health` и `getSyncToken` являются gateway-managed и не маппятся на gRPC (см. `docs/SPEC-STATUS.md`);
 - request/response schemas;
 - обязательные headers;
 - error codes;

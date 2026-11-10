@@ -2,9 +2,10 @@
 ## «Диаграмма Ганта — проект SMART OATI»
 
 **Версия пакета:** 1.3  
-**Дата:** 2026-10-28
+**Дата исходного пакета:** 2026-10-28<br>
+**Статус:** пакет проектных требований; не является отчётом о фактической реализации.
 
-Пакет закрывает контрактные блокеры и фиксирует минимальный delivery-контур для старта разработки.
+Фактическое состояние кода и инфраструктуры ведётся отдельно в [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md), актуальность контрактов — в [`docs/SPEC-STATUS.md`](../../../SPEC-STATUS.md). Описания ниже сохраняют целевые требования; проверяйте их статус перед использованием как инструкции.
 
 | Документ | Содержание |
 |----------|------------|
@@ -18,7 +19,7 @@
 | `08_Proto_сборка_и_кодогенерация.md` | Buf, валидация, JS-клиенты |
 | `09_Эксплуатация_и_безопасность.md` | Домены, CORS, secrets, Kubernetes, SLO |
 | `10_План_тестирования.md` | Contract, integration, load, failure |
-| `11_Полные_payload_событий.md` | Все 64 payload-схемы событий |
+| `11_Полные_payload_событий.md` | Проектный снимок payload-контрактов; актуальный каталог и число схем см. в `events/` и `docs/SPEC-STATUS.md` |
 | `12_Формат_импорта_экспорта.md` | JSON/CSV v2 и legacy v9/v1 |
 | `13_Local_Development_Runbook.md` | Локальный запуск, Docker Compose, HTTPS, Kafka, dev-admin |
 | `14_MVP_Scope_and_Backlog.md` | Границы MVP, epics, user stories, acceptance criteria, DoR/DoD |
@@ -30,13 +31,17 @@
 | `20_Messaging_Operations.md` | Kafka topic, partitions, outbox/inbox, retry, DLQ, replay |
 | `21_Test_Data_and_Contract_Mocks.md` | Seed, fixtures, mock server, contract/E2E/load данные |
 
-## Открытые блокеры
+## Статус реализации и открытые вопросы
 
-- **PLAT-08:** `owner.transfer` и `diagram.*` добавлены в seed; осталось реализовать active-user проверку `project.create` и permission-check в сервисах.
-- **ADR-011:** не решено, импорт заменяет диаграмму или создает новую.
-- **Sync docs:** план 1.6 еще упоминает NATS/RabbitMQ и Redis-сессии; привести к ADR-001/004/008/010.
-- **PLAT-02/03:** Compose, CI, security и images workflows, Helm service template созданы; не хватает Dockerfile приложений, deploy workflows и конкретных Helm-чартов.
-- **PLAT-04/07:** нет codegen и mock server; contract structure check уже есть.
+Пункты ниже — результат сверки с репозиторием на 2026-11-10; источники и подробности приведены в [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md).
+
+- **PLAT-08 / Authorization:** проверки `CheckProjectPermission` в User Service/Project Service и active-user validation владельца в `EnsureProjectOwner` присутствуют в коде (`apps/user-service/src/auth.js`, `apps/project-service/src/projects.js`). Пункт из исходного списка блокеров закрыт по наличию реализации; прогоните unit/integration tests перед release.
+- **ADR-011 / import:** текущая реализация импортирует в переданную диаграмму и заменяет её содержимое в транзакции; preview откатывает транзакцию. Поведение кода зафиксировано, но формальное продуктовое решение ADR-011 не оформлено.
+- **Sync:** требования этого пакета про cookie, subscribe/backfill и notification WebSocket не совпадают с реализованным контрактом. Для текущей интеграции используйте `sync/asyncapi.yaml`; `/ws/notifications` не реализован.
+- **Local/CI/packaging:** Dockerfile приложений, local Compose, CI workflows и Helm charts в репозитории присутствуют. Их наличие не подтверждает успешный production deployment.
+- **PLAT-04/07:** генератор proto `tools/generate-proto.ps1` и contract structure check есть; отдельный OpenAPI client generator, готовый mock server и проверка полноты REST/gRPC mapping не обнаружены. Mapping содержит 97 записей для 99 OpenAPI operations; gateway-managed `health` и `getSyncToken` не маппятся на gRPC.
+- **Kafka:** Compose задаёт `rp_gant.events`, но fallback publishers/consumers — `rpgant.events`; Compose передаёт `KAFKA_TOPIC`, прямые запуски без переменной могут использовать другой topic.
+- **ADR-010 / auth-email:** User Service отправляет verification/reset письма напрямую через свой SMTP mailer; предусмотренный ADR вызов Notification Service по gRPC и `auth_email_jobs` не обнаружены.
 
 ## Реализационные артефакты
 
@@ -76,8 +81,8 @@ D:\ОАТИ\Ганты\Исходные кодв
 
 ## Границы
 
-- P0 закрывает блокеры для старта разработки.
-- Полные бизнес-сценарии frontend, UI и production-эксплуатация остаются отдельными этапами.
+- P0 описывает проектные требования и критерии, а не автоматически подтверждённую реализацию.
+- Полные бизнес-сценарии frontend, UI и production-эксплуатация требуют проверки отдельно.
 - Секреты и реальные домены не входят в репозиторий.
 
 

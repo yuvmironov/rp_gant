@@ -82,7 +82,7 @@ User & Access Service — единственный владелец пользо
 | Runtime | Node.js 22 LTS |
 | Язык | JavaScript, без TypeScript |
 | API | gRPC/protobuf |
-| БД | PostgreSQL 16 |
+| БД | проектная модель PostgreSQL 16; local Compose PostgreSQL 17; production — не зафиксирован |
 | Схемы | `access`, `jobs`, `settings`, `events`, `analytics`, `ext` |
 | События | outbox + брокер |
 | Пароли | Argon2id |

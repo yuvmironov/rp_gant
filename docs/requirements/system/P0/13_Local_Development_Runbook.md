@@ -2,8 +2,10 @@
 ## SMART OATI
 
 **Версия:** 1.0  
-**Дата:** 2026-10-28  
+**Дата исходного документа:** 2026-10-28<br>
 **Область:** локальная разработка full-stack приложения
+
+> Для актуальных команд и переменных используйте `infrastructure/local/README.md`, `infrastructure/local/.env.example` и [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md). Этот runbook сохраняет целевые сценарии; local Compose в текущем репозитории использует PostgreSQL 17, RP Gant домены, SPA frontend и topic `rp_gant.events`.
 
 ---
 
@@ -12,9 +14,9 @@
 - Кросс-платформенный runbook.
 - Основные ОС: Windows 11, macOS, Linux.
 - **Все приложения и инфраструктура запускаются в Docker Compose.**
-- Инфраструктура: PostgreSQL latest, Redis, Kafka, Mailpit, mock Telegram, Traefik.
-- Приложения: API Gateway, User & Access, Project / Diagram, Notification, Audit, Sync / Realtime, Frontend Nuxt SSR.
-- HTTPS локально через `mkcert`.
+- Инфраструктура текущего local Compose: PostgreSQL 17, Redis (сейчас приложением не используется), Kafka, Mailpit, mock Telegram, Traefik.
+- Приложения текущего профиля: API Gateway, User & Access, Project / Diagram, Notification, Audit, Sync / Realtime, Nuxt SPA frontend (`ssr: false`).
+- Текущий local Compose использует самоподписанный сертификат Traefik; `mkcert` — альтернативный целевой вариант.
 - Пакетный менеджер — `pnpm`.
 - Node.js 22 LTS.
 
@@ -155,30 +157,30 @@ mkcert -install
 
 ```text
 mkdir certs
-mkcert -cert-file certs/local.pem -key-file certs/local-key.pem "*.localhost" localhost 127.0.0.1 ::1
+mkcert -cert-file certs/local.pem -key-file certs/local-key.pem "*.rp-gant.localhost" localhost 127.0.0.1 ::1
 ```
 
 Домены:
 
 | Домен | Назначение |
 |-------|------------|
-| `app.localhost` | Nuxt frontend |
-| `api.localhost` | API Gateway |
-| `sync.localhost` | Sync WebSocket |
-| `notify.localhost` | Notification API/WebSocket/webhook |
-| `mail.localhost` | Mailpit UI |
-| `kafka.localhost` | Kafka UI, опционально |
+| `app.rp-gant.localhost` | Nuxt frontend |
+| `api.rp-gant.localhost` | API Gateway |
+| `sync.rp-gant.localhost` | Sync WebSocket |
+| `notify.rp-gant.localhost` | Notification HTTP; Telegram webhook и WebSocket не реализованы |
+| `mail.rp-gant.localhost` | Mailpit UI |
+| `kafka.rp-gant.localhost` | Kafka UI, опционально |
 
-Если `*.localhost` не резолвится в вашей ОС, добавить в hosts:
+Если `*.rp-gant.localhost` не резолвится в вашей ОС, добавить в hosts:
 
 ```text
-127.0.0.1 app.localhost api.localhost sync.localhost notify.localhost mail.localhost kafka.localhost
+127.0.0.1 app.rp-gant.localhost api.rp-gant.localhost sync.rp-gant.localhost notify.rp-gant.localhost mail.rp-gant.localhost kafka.rp-gant.localhost
 ```
 
 Проверить:
 
 ```text
-curl -k https://api.localhost/health
+curl -k https://api.rp-gant.localhost/health
 ```
 
 ---
@@ -198,18 +200,18 @@ curl -k https://api.localhost/health
 | `DATABASE_URL_PROJECT` | Project / Diagram DB |
 | `DATABASE_URL_NOTIFICATION` | Notification DB |
 | `DATABASE_URL_AUDIT` | Audit DB |
-| `REDIS_URL` | Redis |
+| `REDIS_URL` | Redis (контейнер есть, приложение сейчас не использует) |
 | `KAFKA_BROKERS` | `kafka:9092` |
-| `KAFKA_TOPIC` | `smartoati.events` |
+| `KAFKA_TOPIC` | `rp_gant.events` |
 | `SMTP_HOST` | `mailpit` |
 | `SMTP_PORT` | `1025` |
 | `TELEGRAM_API_BASE` | `http://telegram-mock:8080` |
 | `TELEGRAM_BOT_TOKEN` | dev placeholder |
 | `TELEGRAM_WEBHOOK_SECRET` | dev placeholder |
-| `NUXT_PUBLIC_API_BASE` | `https://api.localhost/api/v1` |
-| `NUXT_PUBLIC_SYNC_WS` | `wss://sync.localhost/ws` |
-| `NUXT_PUBLIC_NOTIFICATION_WS` | `wss://notify.localhost/ws/notifications` |
-| `CORS_ORIGINS` | `https://app.localhost` |
+| `NUXT_PUBLIC_API_BASE` | `https://api.rp-gant.localhost/api/v1` |
+| `NUXT_PUBLIC_SYNC_WS` | `wss://sync.rp-gant.localhost/ws` |
+| `NUXT_PUBLIC_NOTIFICATION_WS` | `wss://notify.rp-gant.localhost/ws/notifications` (planned; WebSocket не реализован) |
+| `CORS_ORIGINS` | `https://app.rp-gant.localhost` |
 | `DEV_ADMIN_EMAIL` | Первый администратор |
 | `DEV_ADMIN_PASSWORD` | Пароль только для local |
 
@@ -246,15 +248,15 @@ curl -k https://api.localhost/health
 ### 7.3. PostgreSQL
 
 - один контейнер;
-- базы: `smart_oati_user`, `smart_oati_project`, `smart_oati_notification`, `smart_oati_audit`;
+- базы: `rp_gant_user`, `rp_gant_project`, `rp_gant_notification`, `rp_gant_audit`;
 - init-скрипт создает базы;
 - volume `postgres_data`;
-- `postgres:latest` только для local; CI/staging пиновать по digest.
+- Local Compose фиксирует `postgres:17-alpine`; production/CI-образы задаются отдельно.
 
 ### 7.4. Kafka
 
 - один KRaft-брокер;
-- topic `smartoati.events`;
+- topic `rp_gant.events`;
 - partitions — 6;
 - replication factor — 1;
 - Kafka UI — опционально;
@@ -266,12 +268,12 @@ curl -k https://api.localhost/health
 - HTTP 80 redirect на HTTPS;
 - сертификат `certs/local.pem`;
 - маршруты:
-  - `app.localhost` → frontend:3000;
-  - `api.localhost` → api-gateway:8080;
-  - `sync.localhost` → sync:8080;
-  - `notify.localhost` → notification:8080;
-  - `mail.localhost` → mailpit:8025;
-  - `kafka.localhost` → kafka-ui:8080.
+  - `app.rp-gant.localhost` → frontend:3000;
+  - `api.rp-gant.localhost` → api-gateway:8080;
+  - `sync.rp-gant.localhost` → sync:8080;
+  - `notify.rp-gant.localhost` → notification:8080;
+  - `mail.rp-gant.localhost` → mailpit:8025;
+  - `kafka.rp-gant.localhost` → kafka-ui:8080.
 
 ### 7.6. Приложения
 
@@ -356,8 +358,8 @@ pnpm dev:bootstrap-admin
 ## 11. Проверка после запуска
 
 ```text
-curl -k https://api.localhost/health
-curl -k https://app.localhost
+curl -k https://api.rp-gant.localhost/health
+curl -k https://app.rp-gant.localhost
 ```
 
 Проверить:
@@ -383,7 +385,7 @@ curl -k https://app.localhost
 
 ### 12.1. Email
 
-- Mailpit UI: `https://mail.localhost`;
+- Mailpit UI: `https://mail.rp-gant.localhost`;
 - SMTP: `mailpit:1025`;
 - письма не уходят наружу;
 - проверить auth-письма и приглашения.
@@ -392,7 +394,7 @@ curl -k https://app.localhost
 
 - mock Telegram API: `http://telegram-mock:8080`;
 - реальный бот не обязателен;
-- webhook: `https://notify.localhost/telegram/webhook`;
+- планируемый webhook: `https://notify.rp-gant.localhost/telegram/webhook` (маршрут в приложениях не обнаружен);
 - секрет — dev placeholder;
 - проверить `/start <код>` и `/stop` через mock.
 
@@ -401,13 +403,13 @@ curl -k https://app.localhost
 ## 13. Kafka
 
 - broker: `kafka:9092`;
-- topic: `smartoati.events`;
+- topic: `rp_gant.events`;
 - partitions: 6;
 - consumer groups:
   - `notification`;
   - `audit`;
   - `sync`.
-- Kafka UI: `https://kafka.localhost`;
+- Kafka UI: `https://kafka.rp-gant.localhost`;
 - проверить outbox → topic → consumers;
 - DLQ/error topic — опционально.
 
@@ -419,7 +421,7 @@ curl -k https://app.localhost
 2. `pnpm install`.
 3. `pnpm dev:up`.
 4. Проверить health.
-5. Открыть `https://app.localhost`.
+5. Открыть `https://app.rp-gant.localhost`.
 6. Войти dev-администратором.
 7. Работать.
 8. `pnpm dev:down` перед завершением.
@@ -463,12 +465,12 @@ pnpm dev:reset
 |----------|---------|
 | Docker не стартует | Проверить WSL2/виртуализацию, перезапустить Docker Desktop |
 | Мало памяти | Увеличить Docker memory до 8–12 ГБ |
-| `*.localhost` не открывается | Добавить hosts-записи |
+| `*.rp-gant.localhost` не открывается | Добавить hosts-записи |
 | Сертификат не доверенный | `mkcert -install`, перезапустить браузер |
 | Cookie не устанавливается | Проверить HTTPS и `Secure`/`SameSite` |
-| CORS-ошибка | Проверить `CORS_ORIGINS=https://app.localhost` |
+| CORS-ошибка | Проверить `CORS_ORIGINS=https://app.rp-gant.localhost` |
 | Kafka не готова | Дождаться healthcheck, проверить topic |
-| PostgreSQL latest изменился | Пиновать digest в CI/staging |
+| Версия PostgreSQL расходится | Local — PostgreSQL 17; сверить production/CI конфигурации |
 | Миграция падает | Проверить подключение и порядок БД |
 | Файлы не перезагружаются | Включить polling для Docker на Windows/WSL |
 | Порт занят | Освободить 80/443/5432/6379/9092/8025 |
@@ -493,7 +495,7 @@ pnpm dev:reset
 ## 18. Критерии приемки
 
 1. Docker Compose поднимает инфраструктуру и все приложения.
-2. HTTPS работает на `*.localhost`.
+2. HTTPS работает на `*.rp-gant.localhost`.
 3. PostgreSQL содержит 4 БД.
 4. Kafka topic создан.
 5. Redis доступен.

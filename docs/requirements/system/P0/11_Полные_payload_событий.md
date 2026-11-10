@@ -2,7 +2,9 @@
 ## SMART OATI
 
 **Версия:** 1.0  
-**Дата:** 2026-10-28
+**Дата исходного документа:** 2026-10-28
+
+> Этот документ — проектный перечень, не актуальный полный каталог. Текущие event types и payload-схемы находятся в `events/event-types.json` и `events/schemas/payloads.schema.json`; сейчас каталог содержит 68 event types, а payload schema — 79 definitions. См. [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md).
 
 ---
 
@@ -19,7 +21,7 @@
 
 ## 2. Правила
 
-- Конверт — `EventEnvelope`.
+- Конверт — `EventEnvelope`; фактические имена полей — snake_case по `events/schemas/event-envelope.schema.json`.
 - `payloadSchema` события указывает на `payloads.schema.json#/$defs/<Name>`.
 - Выбор payload — по `eventType`.
 - Все payload — strict, `additionalProperties: false`.
@@ -108,10 +110,10 @@
 
 ## 4. Критерии приемки
 
-1. У всех 64 событий есть payload schema.
+1. Для каждого события из актуального `events/event-types.json` определена подходящая payload schema; число типов не дублируется константой.
 2. Нет ссылок на отсутствующие `$defs`.
 3. Все схемы strict.
-4. `actorRoles` обязателен в EventEnvelope.
+4. `actor_roles` обязателен по текущей JSON Schema; фактическая передача значимых ролей producers пока не реализована (см. `docs/IMPLEMENTATION-STATUS.md`).
 5. PII не передается.
 6. `bodyPreview` не превышает 200 символов.
 7. `diagram.changed` содержит полный объект.

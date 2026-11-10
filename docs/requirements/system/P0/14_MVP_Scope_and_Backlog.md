@@ -3,7 +3,7 @@
 
 **Версия:** 1.0  
 **Дата:** 2026-10-28  
-**Статус:** draft for approval  
+**Статус:** draft for approval; backlog описывает границы и целевые критерии, а не фактическое завершение задач. Текущее состояние репозитория: [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md).
 **Область:** границы MVP, epics, user stories, acceptance criteria, зависимости и Definition of Done  
 **Связанные документы:** `../SMART_OATI_план_реализации_серверных_интеграций.md`, `P0/15_ADR_Package.md`, `P0/16_Authorization_Matrix.md`, `Системная_постановка_Frontend_SMART_OATI.md`
 

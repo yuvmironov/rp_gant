@@ -2,28 +2,28 @@
 ## SMART OATI
 
 **Версия:** 1.0  
-**Дата:** 2026-10-28
+**Дата исходного документа:** 2026-10-28
+
+> **Статус:** описанный ниже cookie/subscribe/backfill протокол — проектное требование, не текущая реализация. Sync сейчас использует `GET /api/v1/sync/token` и `/ws?token=...` без subscribe/unsubscribe; `/ws/notifications` не реализован. Для фактических форматов используйте `sync/asyncapi.yaml`, `notifications/asyncapi.yaml` и [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md).
 
 ---
 
 ## 1. Артефакты
 
-- `Исходные кодв/sync/asyncapi.yaml`;
-- `Исходные кодв/sync/schemas/subscribe.schema.json`;
-- `Исходные кодв/sync/schemas/subscribed.schema.json`;
-- `Исходные кодв/sync/schemas/unsubscribe.schema.json`;
-- `Исходные кодв/sync/schemas/unsubscribed.schema.json`;
-- `Исходные кодв/sync/schemas/diagram-changed.schema.json`;
-- `Исходные кодв/sync/schemas/snapshot-required.schema.json`;
-- `Исходные кодв/sync/schemas/error.schema.json`;
-- `Исходные кодв/sync/schemas/ping.schema.json`;
-- `Исходные кодв/sync/schemas/pong.schema.json`.
-- `Исходные кодв/notifications/asyncapi.yaml`;
-- `Исходные кодв/notifications/schemas/notification-created.schema.json`;
-- `Исходные кодв/notifications/schemas/unread-count.schema.json`;
-- `Исходные кодв/notifications/schemas/error.schema.json`;
-- `Исходные кодв/notifications/schemas/ping.schema.json`;
-- `Исходные кодв/notifications/schemas/pong.schema.json`.
+Текущие репозиторные схемы (не все описывают реализованный endpoint):
+
+- `sync/asyncapi.yaml`;
+- `sync/schemas/connected.schema.json`;
+- `sync/schemas/diagram-changed.schema.json`;
+- `sync/schemas/error.schema.json`;
+- `sync/schemas/ping.schema.json`;
+- `sync/schemas/pong.schema.json`;
+- `notifications/asyncapi.yaml` — planned;
+- `notifications/schemas/notification-created.schema.json`;
+- `notifications/schemas/unread-count.schema.json`;
+- `notifications/schemas/error.schema.json`;
+- `notifications/schemas/ping.schema.json`;
+- `notifications/schemas/pong.schema.json`.
 
 ---
 

@@ -3,7 +3,7 @@
 
 **Версия:** 1.0  
 **Дата:** 2026-10-28  
-**Статус:** draft for approval  
+**Статус пакета:** draft for approval; статусы отдельных ADR приведены в индексе. Текущая реализация и расхождения см. в `docs/IMPLEMENTATION-STATUS.md`.
 **Область:** ключевые архитектурные решения и шаблон для новых ADR  
 **Связанные документы:** `P0/14_MVP_Scope_and_Backlog.md`, `P0/16_Authorization_Matrix.md`, `../SMART_OATI_план_реализации_серверных_интеграций.md`
 
@@ -41,21 +41,22 @@
 **Дата:** 2026-10-28  
 **Контекст:**
 
-- В системе 64 события, outbox, consumers, retries и DLQ.
+- В каталоге сейчас 68 типов событий (30 implemented, 38 planned), используются outbox и consumers.
 - Local runbook уже использует Kafka KRaft.
-- План реализации допускает NATS JetStream или RabbitMQ.
+- Исторический план реализации допускал NATS JetStream или RabbitMQ; выбор Kafka зафиксирован в этом ADR.
 - Два разных брокера в local и production создадут лишний риск и дублирование кода.
-- Решение подтверждено: Kafka используется во всех окружениях.
+- Решение: Kafka — целевой брокер во всех окружениях; production rollout отдельно не подтверждён.
 
 **Решение:**
 
 Использовать **Kafka** во всех окружениях:
 
 - local — Kafka KRaft в Docker Compose;
-- staging/production — Yandex Managed Kafka;
+- staging/production — Yandex Managed Kafka как целевой вариант; фактическое production-развертывание в репозитории не подтверждено;
 - один брокер для всех сервисов;
 - JSON-схемы событий из `events/` и `notifications/`;
-- MVP: один topic `smartoati.events`, маршрутизация по `eventType`; разделение по domain topics — только при доказанной необходимости;
+- local Compose: один topic `rp_gant.events`, маршрутизация по `event_type`; разделение по domain topics — только при доказанной необходимости;
+- кодовый fallback для `KAFKA_TOPIC` сейчас `rpgant.events`; Compose передаёт `rp_gant.events`, см. `docs/IMPLEMENTATION-STATUS.md`;
 - partition key — `projectId` для проектных событий, `userId` для пользовательских;
 - consumer groups — по сервису;
 - DLQ/error topic для каждого consumer group;
@@ -65,7 +66,7 @@
 **Последствия:**
 
 - Нужны `kafkajs`, provisioning topics, DLQ, monitoring lag.
-- P0 13 и `.env.example` уже используют Kafka; план нужно синхронизировать с этим ADR.
+- P0 runbook обновлён как исторический документ; local Compose и `.env.example` задают `rp_gant.events`.
 - Появляется единый operational runbook.
 - Schema registry в MVP не обязателен; совместимость проверяется contract-тестами.
 
@@ -75,7 +76,7 @@
 - RabbitMQ — удобные routing/очереди, но хуже replay и партиционирование.
 - Kafka + отдельный broker для Notification — избыточно.
 
-**Принято:** Kafka во всех окружениях; локальный KRaft и production-кластер используют один и тот же контракт событий.
+**Целевое решение:** Kafka во всех окружениях. Local KRaft подтверждён конфигурацией Compose; production-кластер и идентичность его настроек в репозитории не подтверждены.
 
 ---
 
@@ -88,7 +89,8 @@
 
 - Публичный API — только REST/JSON через API Gateway.
 - Внутренние вызовы — gRPC/protobuf.
-- Gateway — тонкий прокси: auth, CSRF, rate limits, mapping REST↔gRPC.
+- Gateway — целевой тонкий прокси: auth, CSRF, rate limits, mapping REST↔gRPC.
+- Текущая реализация использует gRPC для User/Project и внутренний HTTP для Notification/Audit (см. `docs/IMPLEMENTATION-STATUS.md`).
 - Gateway не агрегирует данные и не содержит бизнес-логику.
 - Frontend не вызывает gRPC и не ходит в БД напрямую.
 
@@ -144,7 +146,7 @@
 - Максимум 2 активные сессии.
 - JWT access/refresh и localStorage не используются.
 - `ValidateSession` вызывается Gateway и Sync; Sync — с `extendIdle=false`.
-- Источник истины — User Service: сессии в PostgreSQL. Упоминание Redis для сессий в плане 3.6 считается устаревшим; Redis используется для rate limit, presence и кэша.
+- Источник истины — User Service: сессии в PostgreSQL. Упоминание Redis для сессий в плане 3.6 считается устаревшим. Rate limit/presence/cache — целевые назначения Redis; local Compose сейчас поднимает Redis, но приложение его не использует.
 
 **Последствия:**
 
@@ -166,7 +168,8 @@
 - Nuxt 3, Vue 3, JavaScript без TypeScript.
 - Tailwind CSS 4 + собственные компоненты.
 - SSR для публичных и списочных экранов; Gantt — client-only.
-- API-клиент генерируется из OpenAPI.
+- Текущая конфигурация `apps/frontend/nuxt.config.ts` устанавливает `ssr: false`; SSR из этого ADR ещё не включён.
+- API-клиент должен генерироваться из OpenAPI; отдельный OpenAPI client generator в текущем репозитории не обнаружен (см. `docs/IMPLEMENTATION-STATUS.md`).
 - Состояние — Pinia/composables; без хранения токенов.
 - Дизайн-токены — CSS variables + Tailwind theme.
 
@@ -192,7 +195,7 @@
 - Consumer сохраняет `eventId` и обрабатывает идемпотентно.
 - Доставка at-least-once; порядок гарантируется в пределах partition key.
 - Retry с backoff; после лимита — DLQ/error topic.
-- Event envelope: `eventId`, `eventType`, `version`, `occurredAt`, `producer`, `correlationId`, `payload`.
+- Event envelope по фактической JSON Schema: `event_id`, `event_type`, `schema_version`, `occurred_at`, `source_service`, `actor_user_id`, `actor_roles`, `project_id`, `diagram_id`, `entity_type`, `entity_id`, `payload`; `request_id` и `correlation_id` nullable.
 
 **Последствия:**
 
@@ -258,8 +261,9 @@
 
 - OpenAPI 1.2 — источник публичного REST.
 - Proto 1.0 — источник внутреннего gRPC.
-- Генерация клиентов и серверных стабов — в CI.
+- Генерация клиентов и серверных стабов — целевой процесс в CI.
 - `contracts/rest-grpc-map.yaml` — mapping.
+- Текущий `.github/workflows/contracts.yml` выполняет lint/breaking/structure checks; code generation в workflow не обнаружен.
 - Contract tests обязательны.
 - Ручные DTO не дублируют сгенерированные без причины.
 
@@ -292,6 +296,8 @@
 - Retry/backoff и журнал доставки обязательны.
 - In-app уведомления, email по задачам, напоминания и Telegram остаются R2/R3.
 - Полная матрица уведомлений P0/05 включается позже, но контракт `SendAuthEmail` стабилен с MVP.
+
+**Статус реализации:** это решение не реализовано: User Service отправляет auth-письма напрямую своим SMTP mailer; вызов Notification Service по gRPC и таблица `auth_email_jobs` не обнаружены. См. `docs/IMPLEMENTATION-STATUS.md`.
 
 **Последствия:**
 

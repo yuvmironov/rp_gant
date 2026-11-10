@@ -16,6 +16,8 @@
 **Соответствует Telegram Bot:** версия 1.0  
 **Соответствует P0:** версия 1.0
 
+> **Статус реализации:** это целевая спецификация. В текущем `apps/frontend` Nuxt настроен с `ssr: false`; Notification WebSocket не реализован. Сверяйте доступные страницы и маршруты с `apps/frontend/pages/`, фактические контракты — с `openapi/` и [`docs/IMPLEMENTATION-STATUS.md`](../../IMPLEMENTATION-STATUS.md).
+
 ---
 
 ## 1. Назначение
