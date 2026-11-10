@@ -77,7 +77,7 @@ Notification Service отвечает за:
 | Runtime | Node.js 22 LTS |
 | Язык | JavaScript, без TypeScript |
 | API | gRPC/protobuf |
-| БД | PostgreSQL 16 |
+| БД | проектная модель PostgreSQL 16; local Compose PostgreSQL 17; production — не зафиксирован |
 | Схемы | `notify`, `delivery`, `scheduler`, `bots`, `events`, `analytics`, `ext` |
 | Email | SMTP |
 | Telegram | Bot API, webhook |

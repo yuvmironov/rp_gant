@@ -22,6 +22,8 @@
 
 ## Локальный Docker Compose
 
+Текущие Compose и `.env.example` передают `KAFKA_TOPIC=rp_gant.events`. Все сервисы используют fallback `rpgant.events`, если переменная отсутствует; не запускайте producer/consumer без согласованной переменной до устранения этого расхождения. Подробности: [`Состояние реализации`](IMPLEMENTATION-STATUS.md).
+
 Старые и новые volumes не совместимы по именам: Compose создаёт `rp-gant_postgres_data`,
 `rp-gant_kafka_data` и `rp-gant_redis_data`. Автоматического переименования volumes нет.
 

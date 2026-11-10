@@ -14,6 +14,8 @@
 **Соответствует Audit Service:** версия 1.0  
 **Соответствует Telegram Bot:** версия 1.0
 
+> **Статус:** текущие proto-контракты лежат в `proto/rpgant/`; список пакетов ниже проверяется по этим файлам. Этот документ — проектная спецификация, не источник фактических protobuf-имён. Сводка: [`docs/IMPLEMENTATION-STATUS.md`](../../IMPLEMENTATION-STATUS.md).
+
 ---
 
 ## 1. Назначение
@@ -89,12 +91,12 @@ proto/
 
 | Файл | Пакет | Назначение |
 |------|-------|------------|
-| `common/v1/common.proto` | `smartoati.common.v1` | Общие перечисления, пагинация, ссылки, проектное участие |
-| `events/v1/events.proto` | `smartoati.events.v1` | Конверт события и payload для брокера |
-| `user/v1/user_service.proto` | `smartoati.user.v1` | Пользователи, сессии, роли, участия, приглашения, исполнители, Telegram, настройки |
-| `project/v1/project_service.proto` | `smartoati.project.v1` | Проекты, диаграммы, план, импорт и экспорт |
-| `notification/v1/notification_service.proto` | `smartoati.notification.v1` | Уведомления, настройки, auth-письма, журнал доставки |
-| `audit/v1/audit_service.proto` | `smartoati.audit.v1` | Общий и привилегированный аудит |
+| `common/v1/common.proto` | `rpgant.common.v1` | Общие перечисления, пагинация, ссылки, проектное участие |
+| `events/v1/events.proto` | `rpgant.events.v1` | Конверт события и payload для брокера |
+| `user/v1/user_service.proto` | `rpgant.user.v1` | Пользователи, сессии, роли, участия, приглашения, исполнители, Telegram, настройки |
+| `project/v1/project_service.proto` | `rpgant.project.v1` | Проекты, диаграммы, план, импорт и экспорт |
+| `notification/v1/notification_service.proto` | `rpgant.notification.v1` | Уведомления, настройки, auth-письма, журнал доставки |
+| `audit/v1/audit_service.proto` | `rpgant.audit.v1` | Общий и привилегированный аудит |
 
 ---
 

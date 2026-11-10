@@ -2,7 +2,9 @@
 ## SMART OATI
 
 **Версия:** 1.0  
-**Дата:** 2026-10-28
+**Дата исходного документа:** 2026-10-28
+
+> Этот DDL — проектный baseline, не точный дамп текущих миграций. Local Compose сейчас использует PostgreSQL 17 и базы `rp_gant_*`; production-версия PostgreSQL не подтверждена. Схема runtime определяется файлами `db/migrations/`.
 
 ---
 
@@ -20,14 +22,14 @@
 
 ## 2. Кластер и базы
 
-Один кластер PostgreSQL 16.
+Проектный baseline описан для одного кластера PostgreSQL 16. В local Compose задан `postgres:17-alpine`; производственная версия должна быть зафиксирована отдельно.
 
 | База | Назначение |
 |------|------------|
-| `smart_oati_user` | User & Access |
-| `smart_oati_project` | Project / Diagram |
-| `smart_oati_notification` | Notification |
-| `smart_oati_audit` | Audit |
+| `rp_gant_user` | User & Access |
+| `rp_gant_project` | Project / Diagram |
+| `rp_gant_notification` | Notification |
+| `rp_gant_audit` | Audit |
 
 Внутри баз используются отдельные схемы:
 
