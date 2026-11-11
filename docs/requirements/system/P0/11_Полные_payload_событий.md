@@ -113,7 +113,7 @@
 1. Для каждого события из актуального `events/event-types.json` определена подходящая payload schema; число типов не дублируется константой.
 2. Нет ссылок на отсутствующие `$defs`.
 3. Все схемы strict.
-4. `actor_roles` обязателен по текущей JSON Schema; фактическая передача значимых ролей producers пока не реализована (см. `docs/IMPLEMENTATION-STATUS.md`).
+4. `actor_roles` обязателен по текущей JSON Schema; User и Project producers сохраняют роли на момент действия в outbox snapshot (см. `docs/IMPLEMENTATION-STATUS.md`).
 5. PII не передается.
 6. `bodyPreview` не превышает 200 символов.
 7. `diagram.changed` содержит полный объект.

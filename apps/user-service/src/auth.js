@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
-import { queueUserEvent } from './events.js';
+import { getActorRoles, queueUserEvent } from './events.js';
 import { createMailer } from './mailer.js';
 import { status } from '@grpc/grpc-js';
 
@@ -981,6 +981,7 @@ export function createUserImplementation({
       }
       let client;
       try {
+        const actorRoles = await getActorRoles(db, actorUserId, projectId);
         client = await db.connect();
         await client.query('BEGIN');
         await client.query(
@@ -1010,6 +1011,8 @@ export function createUserImplementation({
           aggregateId: projectId,
           eventType: 'project.owner.transferred',
           actorUserId,
+          actorRoles,
+          projectId,
           entityType: 'user',
           entityId: newOwnerUserId,
           payload: { projectId, newOwnerUserId },
@@ -1065,6 +1068,7 @@ export function createUserImplementation({
         return;
       }
       try {
+        const actorRoles = await getActorRoles(db, actorUserId, projectId);
         const current = await db.query(
           `SELECT role_code FROM access.project_memberships
            WHERE project_id = $1 AND user_id = $2 AND status = 'active'`,
@@ -1091,6 +1095,8 @@ export function createUserImplementation({
           aggregateId: projectId,
           eventType: 'project.member.role_changed',
           actorUserId,
+          actorRoles,
+          projectId,
           entityType: 'user',
           entityId: userId,
           payload: { projectId, userId, role: roleCode },
@@ -1120,6 +1126,7 @@ export function createUserImplementation({
         return;
       }
       try {
+        const actorRoles = await getActorRoles(db, actorUserId, projectId);
         const current = await db.query(
           `SELECT role_code FROM access.project_memberships
            WHERE project_id = $1 AND user_id = $2 AND status = 'active'`,
@@ -1144,6 +1151,8 @@ export function createUserImplementation({
           aggregateId: projectId,
           eventType: 'project.member.removed',
           actorUserId,
+          actorRoles,
+          projectId,
           entityType: 'user',
           entityId: userId,
           payload: { projectId, userId },
@@ -1483,6 +1492,7 @@ export function createUserImplementation({
           callback(grpcError(status.NOT_FOUND, 'user_not_found'));
           return;
         }
+        const actorRoles = await getActorRoles(db, actorUserId);
         const roles = (call.request.roles ?? []).includes('GLOBAL_ROLE_APP_ADMIN');
         await db.query(
           `DELETE FROM access.user_roles WHERE user_id = $1 AND role_code = 'app_admin'`,
@@ -1500,6 +1510,7 @@ export function createUserImplementation({
           aggregateId: userId,
           eventType: 'user.roles.updated',
           actorUserId,
+          actorRoles,
           entityType: 'user',
           entityId: userId,
           payload: { userId, appAdmin: roles },

@@ -24,7 +24,7 @@
 - Всего событий: **68**.
 - `status: implemented` — **30** событий, помеченных как реализованные в каталоге.
 - `status: planned` — **38** событий, зарезервированных в каталоге.
-- Реальная схема envelope и producers используют snake_case. Количество событий (68) не равно числу payload definitions (79 в `payloads.schema.json`).
+- Реальная схема envelope и producers используют snake_case; User/Project outbox producers передают role snapshot в `actor_roles`. Количество событий (68) не равно числу payload definitions (79 в `payloads.schema.json`).
 - `events/asyncapi.yaml` описывает общий канал; статусы событий указаны в каталоге.
 
 ## WebSocket sync

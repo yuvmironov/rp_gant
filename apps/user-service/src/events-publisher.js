@@ -32,7 +32,7 @@ export function startUserOutboxPublisher(db, env = process.env) {
                 occurred_at: new Date(row.occurred_at).toISOString(),
                 source_service: 'user',
                 actor_user_id: headers.actor_user_id ?? '',
-                actor_roles: [],
+                actor_roles: headers.actor_roles ?? [],
                 project_id: headers.project_id ?? '',
                 diagram_id: headers.diagram_id ?? '',
                 entity_type: headers.entity_type ?? row.aggregate_type,
