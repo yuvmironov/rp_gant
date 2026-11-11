@@ -31,6 +31,6 @@
 ### Старт hardening-этапа
 
 - Gateway и Sync Service больше не используют общий `local-sync-secret` вне local/development/test; production startup требует настроенный секрет и отклоняет известный шаблон из `.env.example`.
-- Local Compose теперь передаёт отдельный development sync-secret, а `RATE_LIMIT_MAX` использует собственную переменную.
+- Local Compose теперь передаёт development sync-secret и повышенный `RATE_LIMIT_MAX=1000` для последовательного E2E-набора с общим IP; production-лимит не менялся.
 - Kafka publishers/consumers используют общий fallback `rp_gant.events`, совпадающий с Compose.
 - Contract check сравнивает REST `operationId` с gRPC mapping; единственные явные исключения — gateway-managed `health` и `getSyncToken`.

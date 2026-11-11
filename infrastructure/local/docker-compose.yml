@@ -179,7 +179,7 @@ services:
       AUDIT_SERVICE_URL: http://audit-service:8080
       RPGANT_ENV: local
       SYNC_TOKEN_SECRET: ${SYNC_TOKEN_SECRET:-local-sync-secret}
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
     networks: [rp-gant]
 
   sync-service:
@@ -204,7 +204,6 @@ services:
       SYNC_SERVICE_URL: http://127.0.0.1:8080
       RPGANT_ENV: local
       SYNC_TOKEN_SECRET: ${SYNC_TOKEN_SECRET:-local-sync-secret}
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
     networks: [rp-gant]
 
   audit-service:
