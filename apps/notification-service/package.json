@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "10.2.0",
-    "@grpc/grpc-js": "1.14.0",
+    "@grpc/grpc-js": "^1.14.6",
     "@rp-gant/service-kit": "workspace:*",
     "kafkajs": "2.2.4",
     "nodemailer": "10.0.6",
