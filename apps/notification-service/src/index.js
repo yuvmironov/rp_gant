@@ -11,7 +11,12 @@ import { startNotificationGrpcServer, createNotificationImplementation } from '.
 const db = createPool();
 const userClient = createUserClient();
 const app = buildApp({ db });
-const stopConsumer = await startNotificationConsumer(db, userClient).catch((error) => {
+const stopConsumer = await startNotificationConsumer(
+  db,
+  userClient,
+  process.env,
+  app.metrics,
+).catch((error) => {
   app.log.error(error, 'notification consumer failed to start');
   return async () => {};
 });
@@ -35,6 +40,7 @@ try {
     ],
   });
 } catch (error) {
+  await stopConsumer();
   await stopDelivery();
   await stopAuthEmailDelivery();
   await grpc.close();

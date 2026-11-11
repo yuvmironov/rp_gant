@@ -76,8 +76,27 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
+        set -e
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
           --topic ${KAFKA_TOPIC:-rp_gant.events} \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.dlq.notification \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.dlq.audit \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.dlq.sync \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.replay.audit \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.replay.notification \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.replay.sync \
           --partitions 6 --replication-factor 1
     networks: [rp-gant]
 
@@ -94,6 +113,20 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       DYNAMIC_CONFIG_ENABLED: "false"
+    networks: [rp-gant]
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - --kafka.server=kafka:9092
+      - --web.listen-address=:9308
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     networks: [rp-gant]
 
   mailpit:
@@ -124,6 +157,7 @@ services:
       PROJECT_DB: rp_gant_project
       NOTIFICATION_DB: rp_gant_notification
       AUDIT_DB: rp_gant_audit
+      SYNC_DB: rp_gant_sync
       PGHOST: postgres
       PGUSER: ${POSTGRES_USER:-rp_gant}
       PGPASSWORD: ${POSTGRES_PASSWORD:-rp_gant_dev}
@@ -190,6 +224,8 @@ services:
     image: rp-gant/sync-service:local
     restart: unless-stopped
     depends_on:
+      db-init:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       kafka-init:
@@ -198,6 +234,12 @@ services:
       NODE_ENV: production
       PORT: "8080"
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-}
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-rp_gant}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-rp_gant_dev}
+      PGDATABASE: rp_gant_sync
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-rp_gant.events}
       KAFKA_CONSUMER_GROUP_SYNC: sync

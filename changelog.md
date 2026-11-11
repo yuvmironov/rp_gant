@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+### Надёжность событий и staging readiness
+
+- Все Kafka consumers используют bounded retry (5 доставок всего, паузы 1/2/5/10 секунд), DLQ и метрики; Audit, Notification и Sync имеют dry-run/approval-gated replay в отдельные service topics.
+- Consumer side effects/processed-event markers фиксируются транзакционно; Sync dedup ledger вынесен в отдельную `rp_gant_sync` БД.
+- Добавлены Kafka TLS/SASL options с обязательным TLS для SASL, optional CA и staging-only per-service Vault principals; локальный Kafka остаётся без TLS/SASL.
+- Helm staging values задают canonical topic, обязательный bootstrap endpoint, Sync URL/migration и `/ws` ingress; digest/bootstrap guard и Helm render checks включены в required CI. Production Sync DB/security остаются opt-out.
+- Добавлены Prometheus Kafka Exporter, DLQ/outbox alerts и Grafana dashboard panels; restore drill проверяет пять баз, включая Sync ledger.
+- E2E auth-сценарии используют отдельные тестовые учётные записи и завершают admin-сессии, чтобы повторные прогоны не упирались в лимит двух активных сессий seed-администратора.
+- После локальной пересборки `local:health`, restore drill всех пяти БД и полный Playwright E2E (20/20) прошли; unit — 118 тестов. Staging/prod не затрагивались.
+- VPS Compose подключает выделенную `rp_gant_sync`, ждёт `db-init`, проверяет Sync health и создаёт все DLQ/replay topics; CI валидирует sample-config без реальных секретов.
+- VPS deployment runbook закрепляет staging gate, off-host backup и запрет продолжения при непроверенном restore. VPS rollout не выполнялся.
+- Подготовлен staging deployment/acceptance/rollback runbook. Реальный staging/production rollout не выполнялся.
+
 ### Глобальный доступ `app_admin` по ADR-008
 
 - User Service сообщает отдельный `is_admin` flag в `ListAccessibleProjectIds`; Project Service возвращает все проекты администратору, не запрашивая данные напрямую из User DB.

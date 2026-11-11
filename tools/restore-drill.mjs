@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -8,19 +8,62 @@ const composeFile = 'infrastructure/local/docker-compose.yml';
 const envFile = 'infrastructure/local/.env.local';
 const container = `rp-gant-restore-check-${process.pid}`;
 const dir = mkdtempSync(join(tmpdir(), 'rp-gant-restore-'));
-const databases = ['rp_gant_user', 'rp_gant_project', 'rp_gant_notification', 'rp_gant_audit'];
+const databases = [
+  'rp_gant_user',
+  'rp_gant_project',
+  'rp_gant_notification',
+  'rp_gant_audit',
+  'rp_gant_sync',
+];
 
-function run(command, args, options = {}) {
+function commandError(command, result) {
+  const detail = result.error?.message ?? result.stderr?.trim() ?? `exit status ${result.status}`;
+  return new Error(`${command} failed: ${detail}`);
+}
+
+function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: 'utf8',
-    input: options.input,
+    maxBuffer: 8 * 1024 * 1024,
     shell: false,
   });
-  if (result.status !== 0) {
-    throw new Error(`${command} failed: ${result.stderr || result.stdout}`);
-  }
+  if (result.error || result.status !== 0) throw commandError(command, result);
   return result.stdout;
+}
+
+function dumpToFile(args, target) {
+  const fd = openSync(target, 'w');
+  let result;
+  try {
+    result = spawnSync('docker', args, {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+      shell: false,
+      stdio: ['ignore', fd, 'pipe'],
+    });
+  } finally {
+    closeSync(fd);
+  }
+  if (result.error || result.status !== 0) throw commandError('docker', result);
+}
+
+function restoreFromFile(args, source) {
+  const fd = openSync(source, 'r');
+  let result;
+  try {
+    result = spawnSync('docker', args, {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+      shell: false,
+      stdio: [fd, 'ignore', 'pipe'],
+    });
+  } finally {
+    closeSync(fd);
+  }
+  if (result.error || result.status !== 0) throw commandError('docker', result);
 }
 
 function waitForPostgres() {
@@ -51,9 +94,9 @@ function count(database, table) {
   );
 }
 
-try {
-  for (const database of databases) {
-    const dump = run('docker', [
+function sourceCount(database, table) {
+  return Number(
+    run('docker', [
       'compose',
       '--env-file',
       envFile,
@@ -62,14 +105,59 @@ try {
       'exec',
       '-T',
       'postgres',
-      'pg_dump',
+      'psql',
       '-U',
       'rp_gant',
-      '--clean',
-      '--if-exists',
+      '-d',
       database,
-    ]);
-    writeFileSync(join(dir, `${database}.sql`), dump, 'utf8');
+      '-Atc',
+      `SELECT count(*) FROM ${table}`,
+    ]).trim(),
+  );
+}
+
+const checks = [
+  ['rp_gant_user', 'access.users'],
+  ['rp_gant_project', 'project.projects'],
+  ['rp_gant_project', 'plan.tasks'],
+  ['rp_gant_notification', 'notify.notifications'],
+  ['rp_gant_audit', 'audit.audit_events'],
+  ['rp_gant_sync', 'events.processed_events'],
+];
+
+try {
+  const expectedCounts = new Map(
+    checks.map(([database, table]) => [`${database}.${table}`, sourceCount(database, table)]),
+  );
+  for (const database of databases) {
+    dumpToFile(
+      [
+        'compose',
+        '--env-file',
+        envFile,
+        '-f',
+        composeFile,
+        'exec',
+        '-T',
+        'postgres',
+        'pg_dump',
+        '-U',
+        'rp_gant',
+        '--clean',
+        '--if-exists',
+        database,
+      ],
+      join(dir, `${database}.sql`),
+    );
+  }
+  for (const [database, table] of checks) {
+    const actual = sourceCount(database, table);
+    const expected = expectedCounts.get(`${database}.${table}`);
+    if (actual !== expected) {
+      throw new Error(
+        `source changed during backup: ${database}.${table} ${expected} -> ${actual}`,
+      );
+    }
   }
   console.log('backups created');
 
@@ -90,26 +178,22 @@ try {
 
   for (const database of databases) {
     run('docker', ['exec', container, 'createdb', '-U', 'rp_gant', database]);
-    const dump = readFileSync(join(dir, `${database}.sql`), 'utf8');
-    run(
-      'docker',
+    restoreFromFile(
       ['exec', '-i', container, 'psql', '-U', 'rp_gant', '-d', database, '-v', 'ON_ERROR_STOP=1'],
-      { input: dump },
+      join(dir, `${database}.sql`),
     );
   }
   console.log('restore completed');
 
-  const checks = [
-    ['rp_gant_user', 'access.users'],
-    ['rp_gant_project', 'project.projects'],
-    ['rp_gant_project', 'plan.tasks'],
-    ['rp_gant_notification', 'notify.notifications'],
-    ['rp_gant_audit', 'audit.audit_events'],
-  ];
   for (const [database, table] of checks) {
-    const value = count(database, table);
-    console.log(`${database}.${table}: ${value}`);
-    if (value < 0) throw new Error(`invalid count for ${database}.${table}`);
+    const actual = count(database, table);
+    const expected = expectedCounts.get(`${database}.${table}`);
+    console.log(`${database}.${table}: ${actual} (source ${expected})`);
+    if (actual !== expected) {
+      throw new Error(
+        `restored count mismatch: ${database}.${table} expected ${expected}, got ${actual}`,
+      );
+    }
   }
   console.log('restore drill passed');
 } finally {

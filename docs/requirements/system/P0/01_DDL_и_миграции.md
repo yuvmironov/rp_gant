@@ -30,13 +30,15 @@
 | `rp_gant_project` | Project / Diagram |
 | `rp_gant_notification` | Notification |
 | `rp_gant_audit` | Audit |
+| `rp_gant_sync` | Sync processed-event deduplication ledger |
 
 Внутри баз используются отдельные схемы:
 
 - User: `access`, `jobs`, `settings`, `events`, `analytics`, `ext`;
 - Project: `project`, `plan`, `jobs`, `events`, `analytics`, `ext`;
 - Notification: `notify`, `delivery`, `scheduler`, `bots`, `events`, `analytics`, `ext`;
-- Audit: `audit`, `events`, `analytics`, `ext`.
+- Audit: `audit`, `events`, `analytics`, `ext`;
+- Sync: `events`.
 
 ---
 
@@ -47,6 +49,7 @@ db/migrations/user_access/0001_user_access.sql
 db/migrations/project_diagram/0002_project_diagram.sql
 db/migrations/notification/0003_notification.sql
 db/migrations/audit/0004_audit.sql
+db/migrations/sync/0001_sync.sql
 ```
 
 Миграции содержат `-- Up Migration` и `-- Down Migration`.
@@ -62,7 +65,10 @@ node-pg-migrate up -m db/migrations/user_access -d DATABASE_URL_USER
 node-pg-migrate up -m db/migrations/project_diagram -d DATABASE_URL_PROJECT
 node-pg-migrate up -m db/migrations/notification -d DATABASE_URL_NOTIFICATION
 node-pg-migrate up -m db/migrations/audit -d DATABASE_URL_AUDIT
+node-pg-migrate up -m db/migrations/sync -d DATABASE_URL_SYNC  # только при включённой Sync DB
 ```
+
+Миграция Sync DB запускается только при явном `SYNC_DB=rp_gant_sync` и заданном `DATABASE_URL_SYNC`; пустой `SYNC_DB` оставляет её выключенной вне local Compose.
 
 Seed:
 
@@ -79,7 +85,8 @@ psql $DATABASE_URL_AUDIT -f db/seeds/audit/003_audit_actions.sql
 3. Project DB → миграции;
 4. Notification DB → миграции;
 5. Audit DB → миграции и `audit_actions`;
-6. запуск воркеров outbox/import/auth-email/audit consumer.
+6. Sync DB → миграция `events.processed_events`;
+7. запуск воркеров outbox/import/auth-email/audit/sync consumers.
 
 ---
 
@@ -210,7 +217,7 @@ psql $DATABASE_URL_AUDIT -f db/seeds/audit/003_audit_actions.sql
 
 ## 10. Критерии приемки
 
-1. Все 4 миграции применяются на пустых БД.
+1. Bootstrap создаёт все пять service DB и применяет их миграции на пустом PostgreSQL; Sync создаёт `events.processed_events`.
 2. Down-миграции работают.
 3. Seed ролей и прав идемпотентен.
 4. Seed настроек идемпотентен.

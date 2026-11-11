@@ -481,9 +481,11 @@ infrastructure/helm/
 - [ ] Настроить branch protection и environments.
 - [ ] Создать Dockerfile для каждого приложения.
 - [x] Создать Helm service template.
-- [ ] Создать Helm-чарты конкретных сервисов и umbrella.
-- [ ] Создать migration Job.
-- [ ] Создать smoke-тесты.
+- [x] Создать Helm-чарты конкретных сервисов и umbrella.
+- [x] Создать Helm migration Job для пяти service DB, включая `SYNC_DB=rp_gant_sync`.
+- [x] Подготовить staging-only Sync DB/Vault и Kafka TLS/SASL values; см. [`22_Staging_Deployment_Runbook.md`](22_Staging_Deployment_Runbook.md).
+- [ ] Создать/включить deploy-staging workflow после утверждения cluster credentials, GitHub Environment и release digests.
+- [x] Создать local E2E smoke-тесты; staging runtime acceptance остаётся отдельной задачей.
 - [ ] Настроить GHCR.
 - [ ] Настроить Vault и External Secrets Operator.
 - [ ] Настроить Yandex Managed PostgreSQL и Managed Kafka.

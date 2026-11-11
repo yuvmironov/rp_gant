@@ -1,4 +1,4 @@
-import { collectDefaultMetrics, Counter, Histogram, Registry } from 'prom-client';
+import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 export function createMetrics() {
   const registry = new Registry();
@@ -17,8 +17,70 @@ export function createMetrics() {
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
     registers: [registry],
   });
+  const outboxPending = new Gauge({
+    name: 'outbox_pending',
+    help: 'Number of events waiting to be published from the outbox',
+    labelNames: ['service'],
+    registers: [registry],
+  });
+  const outboxRetries = new Gauge({
+    name: 'outbox_events_retry_count_gt_3',
+    help: 'Number of unpublished outbox events with more than three retries',
+    labelNames: ['service'],
+    registers: [registry],
+  });
+  const outboxPublishErrors = new Counter({
+    name: 'outbox_publish_errors_total',
+    help: 'Total failed outbox publish cycles',
+    labelNames: ['service'],
+    registers: [registry],
+  });
+  const eventsProcessed = new Counter({
+    name: 'events_processed_total',
+    help: 'Total successfully processed events',
+    labelNames: ['service'],
+    registers: [registry],
+  });
+  const eventsFailed = new Counter({
+    name: 'events_failed_total',
+    help: 'Total failed event processing attempts',
+    labelNames: ['service'],
+    registers: [registry],
+  });
+  const dlqMessages = new Counter({
+    name: 'dlq_messages_total',
+    help: 'Total messages sent to a dead-letter topic',
+    labelNames: ['service'],
+    registers: [registry],
+  });
+  const eventProcessingDuration = new Histogram({
+    name: 'event_processing_duration_seconds',
+    help: 'Time spent processing an event including retries',
+    labelNames: ['service'],
+    buckets: [0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10, 20, 30],
+    registers: [registry],
+  });
+  const eventProcessingLag = new Histogram({
+    name: 'event_processing_lag_seconds',
+    help: 'Age of an event at the end of consumer processing, based on occurred_at',
+    labelNames: ['service'],
+    buckets: [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600],
+    registers: [registry],
+  });
 
-  return { registry, requests, duration };
+  return {
+    registry,
+    requests,
+    duration,
+    outboxPending,
+    outboxRetries,
+    outboxPublishErrors,
+    eventsProcessed,
+    eventsFailed,
+    dlqMessages,
+    eventProcessingDuration,
+    eventProcessingLag,
+  };
 }
 
 export function registerMetrics(app, metrics) {

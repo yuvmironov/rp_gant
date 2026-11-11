@@ -2,6 +2,8 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
+> **Статус:** конфигурация готовится; VPS rollout не выполнялся. Не выкатывать production, пока не пройдена и не принята staging-приёмка из [`22_Staging_Deployment_Runbook.md`](../../docs/requirements/system/P0/22_Staging_Deployment_Runbook.md) и владелец явно не разрешил cutover.
+
 ## Требования
 
 - Ubuntu 24.04+;
@@ -9,7 +11,8 @@ Production-конфигурация для одного VPS за reverse proxy J
 - 4 ГБ RAM и 20 ГБ диска;
 - домены `app.rp-gant.ru` и `sync.rp-gant.ru`, направленные на VPS;
 - Jino завершает TLS и проксирует HTTPS на внутренний порт `80`;
-- отдельный ящик `no-reply@app.rp-gant.ru` для SMTP.
+- отдельный ящик `no-reply@app.rp-gant.ru` для SMTP;
+- отдельная БД `rp_gant_sync` в том же PostgreSQL для Sync processed-event ledger и replay deduplication.
 
 ## Состав
 
@@ -17,27 +20,36 @@ Production-конфигурация для одного VPS за reverse proxy J
 
 - Caddy (HTTP reverse proxy);
 - PostgreSQL;
-- Kafka в KRaft-режиме;
+- Kafka в KRaft-режиме; `kafka-init` создаёт canonical topic `rp_gant.events` и DLQ/replay topics для Notification, Audit и Sync;
 - API Gateway, User, Project, Notification, Audit, Sync;
 - Nuxt frontend.
 
 Redis, Mailpit, Kafka UI, mock Telegram, Traefik и мониторинг в этот compose не входят.
 
-## Запуск
+## Подготовка и запуск
+
+Перед первым запуском или обновлением:
+
+1. Убедиться, что staging acceptance пройдена, release commit одобрен, DNS/TLS/SMTP доступны.
+2. Создать `infrastructure/vps/.env` только если его ещё нет, заполнить все placeholder значения и сохранить файл только на VPS. Не вставлять содержимое в Git, CI, чат или логи.
+3. Задать случайный `POSTGRES_PASSWORD` и согласованный пароль во всех явных `DATABASE_URL_*`; `SYNC_DB=rp_gant_sync`; случайный `SYNC_TOKEN_SECRET`; SMTP-пароль и начальный пароль администратора. `DATABASE_URL_SYNC` можно задать явно; если его нет, Compose передаст Sync Service параметры PG подключения из уже имеющихся `POSTGRES_USER`/`POSTGRES_PASSWORD`, направив его в `rp_gant_sync`.
+4. Проверить Compose-конфигурацию командой `config --quiet`; не вызывать `config` без `--quiet` в общем терминале, так как полный вывод содержит переменные окружения.
+5. Для существующего VPS подготовить и проверить off-host backup всех БД и план rollback; для пустой первой установки заранее определить backup target и процедуру восстановления.
+
+Подготовка и безопасная проверка (Compose использует `.env`, команда не печатает значения):
 
 ```bash
 cd /opt/rp-gant
-cp infrastructure/vps/.env.example infrastructure/vps/.env
+test -f infrastructure/vps/.env || cp infrastructure/vps/.env.example infrastructure/vps/.env
 nano infrastructure/vps/.env
-docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml up -d --build
+docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml config --quiet
 ```
 
-Перед первым запуском задать:
+После прохождения всех gates и только на одобренном release commit запускать:
 
-- случайный `POSTGRES_PASSWORD` и такие же пароли в `DATABASE_URL_*`;
-- случайный `SYNC_TOKEN_SECRET`;
-- SMTP-пароль;
-- начальный пароль администратора.
+```bash
+docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml up -d --build
+```
 
 Пример генерации секрета:
 
@@ -60,7 +72,7 @@ curl -fsS https://app.rp-gant.ru/health
 curl -fsS https://sync.rp-gant.ru/health/live
 ```
 
-WebSocket `sync.rp-gant.ru` должен отвечать `101 Switching Protocols`.
+Убедиться, что Sync Service имеет статус `healthy` и `db-init` завершился успешно; его миграция создаёт `rp_gant_sync.events.processed_events`. WebSocket `sync.rp-gant.ru` должен отвечать `101 Switching Protocols`.
 
 ## Начальный администратор
 
@@ -73,23 +85,34 @@ WebSocket `sync.rp-gant.ru` должен отвечать `101 Switching Protoco
 
 ## Обновление
 
-Перед применением изменений БД сделайте backup. На VPS выполните:
+Перед применением изменений БД сделайте backup всех баз (включая `rp_gant_sync`). Применение миграций остаётся запрещено без принятой staging-приёмки.
+
+Сначала создайте backup с закрытыми правами:
+
+```bash
+set -euo pipefail
+cd /opt/rp-gant
+umask 077
+compose=(docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml)
+backup_dir=/opt/rp-gant-backups
+mkdir -p "$backup_dir"
+chmod 700 "$backup_dir"
+pg_user="$("${compose[@]}" exec -T postgres printenv POSTGRES_USER)"
+backup="$backup_dir/rp-gant-$(date +%Y%m%d-%H%M%S).sql"
+"${compose[@]}" exec -T postgres pg_dumpall -U "$pg_user" > "$backup"
+test -s "$backup"
+printf 'Backup created: %s\n' "$backup"
+```
+
+**Не продолжать**, пока backup не скопирован в утверждённое off-host хранилище и не подтверждена процедура восстановления. Затем, только для одобренного release commit:
 
 ```bash
 set -euo pipefail
 cd /opt/rp-gant
 git pull --ff-only
-
-umask 077
 compose=(docker compose --env-file infrastructure/vps/.env -f infrastructure/vps/docker-compose.yml)
-backup_dir=/opt/rp-gant-backups
-mkdir -p "$backup_dir"
-pg_user="$("${compose[@]}" exec -T postgres printenv POSTGRES_USER)"
-backup="$backup_dir/rp-gant-$(date +%Y%m%d-%H%M%S).sql"
-"${compose[@]}" exec -T postgres pg_dumpall -U "$pg_user" > "$backup"
-test -s "$backup"
-
-# Повторно применяет идемпотентные миграции и seed, включая новые миграции.
+"${compose[@]}" config --quiet
+# Идемпотентно повторно применяет миграции и seed, включая Sync ledger.
 "${compose[@]}" run --rm db-init
 "${compose[@]}" up -d --build
 "${compose[@]}" ps

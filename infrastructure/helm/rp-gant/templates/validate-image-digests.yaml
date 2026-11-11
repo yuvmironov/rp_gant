@@ -1,0 +1,25 @@
+{{- if .Values.imagePolicy.requireDigests }}
+{{- $apiGateway := index .Values "api-gateway" }}
+{{- $userService := index .Values "user-service" }}
+{{- $projectService := index .Values "project-service" }}
+{{- $notificationService := index .Values "notification-service" }}
+{{- $auditService := index .Values "audit-service" }}
+{{- $syncService := index .Values "sync-service" }}
+{{- $frontend := index .Values "frontend" }}
+{{- $platform := index .Values "platform" }}
+{{- $digests := dict
+  "api-gateway" $apiGateway.image.digest
+  "user-service" $userService.image.digest
+  "project-service" $projectService.image.digest
+  "notification-service" $notificationService.image.digest
+  "audit-service" $auditService.image.digest
+  "sync-service" $syncService.image.digest
+  "frontend" $frontend.image.digest
+  "db-migrate" $platform.migrations.image.digest
+}}
+{{- range $name, $digest := $digests }}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" (toString $digest)) }}
+{{- fail (printf "imagePolicy.requireDigests=true needs a sha256 digest for %s" $name) }}
+{{- end }}
+{{- end }}
+{{- end }}

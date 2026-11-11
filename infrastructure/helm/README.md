@@ -63,6 +63,14 @@ helm template api-gateway infrastructure/helm/api-gateway
 - Runtime install с тестовым образом `nginxinc/nginx-unprivileged:1.27-alpine`: 2/2 pod Running, HTTP 200, PDB и Service созданы.
 - Тестовый release и namespace удалены.
 
+## Staging values и Sync
+
+`infrastructure/helm/rp-gant/values-staging.yaml` содержит только secret references, не значения секретов. Vault records задаются отдельно для каждого сервиса (`rp-gant/staging/<service>`), Sync connection string — property `database_url` в `rp-gant/staging/sync-service`; External Secrets создаёт target Secret `rp-gant-sync` с `token`, `DATABASE_URL_SYNC` и Sync Kafka credentials.
+
+Staging overlay включает Sync DB/migration, canonical topic `rp_gant.events`, TLS/SASL с per-service principals и ingress `/ws` на Sync. Он намеренно оставляет bootstrap endpoint пустым: перед render нужно задать приватные Managed Kafka endpoints, подтвердить SASL mechanism и заменить placeholder DNS/TLS. `imagePolicy.requireDigests` блокирует render без sha256 digest для семи приложений и `db-migrate`.
+
+CI job `helm-templates` собирает umbrella dependencies, lint-ит charts и проверяет staging/production render. Production Sync DB и Kafka SASL остаются opt-out до отдельной приёмки. Наличие values и успешный render не означают, что staging развёрнут: реальные Vault records, ACL, broker, DNS/certificate и runtime acceptance ещё нужны.
+
 ## Правила
 
 - В values нет секретов.

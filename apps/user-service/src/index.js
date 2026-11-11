@@ -14,7 +14,7 @@ const stopAuthEmailJobs = startAuthEmailJobWorker(db, notificationClient, app.lo
 if (await ensureDevAdmin(db)) {
   app.log.info('initial admin is ready');
 }
-const stopOutbox = startUserOutboxPublisher(db);
+const stopOutbox = startUserOutboxPublisher(db, process.env, app.metrics);
 const grpc = await startUserGrpcServer({
   port: Number(process.env.GRPC_PORT ?? 50051),
   implementation: createUserImplementation({

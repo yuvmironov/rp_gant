@@ -16,7 +16,7 @@ const grpc = await startProjectGrpcServer({
   implementation: createProjectImplementation({ db, userClient }),
 });
 app.log.info({ grpcPort: grpc.port }, 'gRPC server started');
-const stopOutbox = startOutboxPublisher(db);
+const stopOutbox = startOutboxPublisher(db, process.env, app.metrics);
 
 try {
   await startService(app, {

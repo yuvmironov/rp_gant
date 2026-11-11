@@ -74,10 +74,6 @@ env:
     value: "production"
   - name: LOG_LEVEL
     value: "info"
-  - name: KAFKA_BROKERS
-    value: "kafka:9092"
-  - name: KAFKA_TOPIC
-    value: "rpgant.events"
   - name: KAFKA_CONSUMER_GROUP_SYNC
     value: "sync"
   - name: SYNC_SERVICE_URL
@@ -89,12 +85,25 @@ env:
         key: token
 
 envFrom: []
+syncDatabase:
+  enabled: false
+  secretName: rp-gant-sync
+  secretKey: DATABASE_URL_SYNC
+kafkaSecurity:
+  enabled: false
+  bootstrapServers: "kafka:9092"
+  topic: rpgant.events
+  saslMechanism: scram-sha-512
+  secretName: rp-gant-sync
+  usernameKey: username
+  passwordKey: password
+  caKey: ""
 externalSecret:
   enabled: false
   secretStoreName: vault-backend
   secretStoreKind: ClusterSecretStore
   refreshInterval: 1h
-  targetSecretName: ""
+  targetSecretName: rp-gant-sync
   data: []
 
 

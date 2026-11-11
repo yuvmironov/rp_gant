@@ -78,10 +78,6 @@ env:
     value: "info"
   - name: USER_SERVICE_GRPC
     value: "user-service:50051"
-  - name: KAFKA_BROKERS
-    value: "kafka:9092"
-  - name: KAFKA_TOPIC
-    value: "rpgant.events"
 
 envFrom:
   - secretRef:
@@ -98,6 +94,16 @@ externalSecret:
         key: rp-gant/project-service
         property: database_url
 
+
+kafkaSecurity:
+  enabled: false
+  bootstrapServers: "kafka:9092"
+  topic: rpgant.events
+  saslMechanism: scram-sha-512
+  secretName: project-service
+  usernameKey: username
+  passwordKey: password
+  caKey: ""
 
 autoscaling:
   enabled: true

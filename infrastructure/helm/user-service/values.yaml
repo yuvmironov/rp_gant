@@ -97,6 +97,16 @@ externalSecret:
         property: database_url
 
 
+kafkaSecurity:
+  enabled: false
+  bootstrapServers: "kafka:9092"
+  topic: rp_gant.events
+  saslMechanism: scram-sha-512
+  secretName: user-service
+  usernameKey: username
+  passwordKey: password
+  caKey: ""
+
 autoscaling:
   enabled: true
   minReplicas: 2

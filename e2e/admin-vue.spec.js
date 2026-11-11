@@ -34,4 +34,7 @@ test('admin can create admins and promote users', async ({ page }) => {
   await expect(row.locator('td').nth(3)).toHaveText('пользователь');
   await row.getByRole('button', { name: 'Сделать админом' }).click();
   await expect(row.locator('td').nth(3)).toHaveText('админ');
+  await page.goto('/projects');
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await expect(page).toHaveURL(/\/login$/);
 });

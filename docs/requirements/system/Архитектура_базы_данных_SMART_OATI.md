@@ -54,11 +54,12 @@
 | `rp_gant_project` | Project / Diagram Service | Проекты, диаграммы, направления, задачи, назначения, зависимости, комментарии, праздники, ревизии, импорт |
 | `rp_gant_notification` | Notification Service | Настройки уведомлений, уведомления, доставки, попытки, auth-письма, напоминания, Telegram-обновления |
 | `rp_gant_audit` | Audit Service | Журнал аудита |
+| `rp_gant_sync` | Sync Service | Durable processed-event IDs для idempotent DLQ replay |
 | Redis | Sync / Realtime Service | Подключения, подписки, presence; бизнес-данные не хранятся |
 
 Все PostgreSQL-базы размещаются в **одном кластере**. Внутри каждой базы используются отдельные схемы.
 
-> Текущая local-конфигурация Redis есть в Compose, но приложение пока её не использует; Sync хранит активные WebSocket-клиенты в памяти процесса. Описание Redis в целевой модели не следует трактовать как уже работающий runtime-контур.
+> Текущая local-конфигурация Redis есть в Compose, но приложение пока её не использует; Sync хранит активные WebSocket-клиенты в памяти процесса и использует `rp_gant_sync` только для durable event deduplication. Описание Redis в целевой модели не следует трактовать как уже работающий runtime-контур.
 
 | База | Схемы | Содержимое |
 |------|-------|------------|
@@ -66,6 +67,7 @@
 | `rp_gant_project` | `project`, `plan`, `jobs`, `events`, `analytics`, `ext` | Проекты и диаграммы; направления, задачи, назначения, зависимости, комментарии, праздники, изменения; импорт; outbox; аналитика |
 | `rp_gant_notification` | `notify`, `delivery`, `scheduler`, `bots`, `events`, `analytics`, `ext` | Настройки и уведомления; доставки и попытки; auth-письма; напоминания; Telegram-обновления; outbox; аналитика |
 | `rp_gant_audit` | `audit`, `events`, `analytics`, `ext` | Журнал аудита; processed events; аналитика |
+| `rp_gant_sync` | `events` | Sync processed events для deduplication по `event_id` |
 
 Имена таблиц ниже указаны без схемы. При реализации они создаются в соответствующей схеме из таблицы выше.
 

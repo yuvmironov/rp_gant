@@ -13,7 +13,7 @@ docker compose --env-file .env.local -f docker-compose.yml --profile infra --pro
 
 При первом запуске:
 
-- `db-init` создаёт схемы, применяет миграции и seed во все 4 БД;
+- `db-init` создаёт пять БД, применяет миграции и seed;
 - Traefik отдаёт локальный самоподписанный сертификат;
 - `user-service` создаёт development-администратора из `DEV_ADMIN_*`.
 
@@ -55,15 +55,17 @@ docker compose --env-file .env.local -f docker-compose.yml --profile infra --pro
 Для запуска мониторинга:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml --profile monitoring up -d prometheus grafana
+docker compose --env-file .env.local -f docker-compose.yml --profile infra --profile monitoring up -d kafka-exporter prometheus grafana
 ```
+
+Prometheus собирает HTTP-метрики приложений, outbox-метрики User/Project Service (`outbox_pending`, `outbox_events_retry_count_gt_3`, publish errors) и consumer-метрики `events_processed_total`, `events_failed_total`, `event_processing_duration_seconds`, `event_processing_lag_seconds`. Kafka Exporter отдаёт consumer lag в количестве сообщений, retained DLQ size и under-replicated partitions; persistent non-zero backlog вызывает алерт через 5 минут. По `occurred_at` считается возраст обрабатываемых событий; отдельный алерт срабатывает, если за окно наблюдались события старше 5 минут. Это не определяет возраст oldest-uncommitted offset, если consumer полностью остановлен — для такого случая остаётся count-lag alert. Consumers делают 5 попыток всего (паузы 1/2/5/10 секунд), затем отправляют envelope и error metadata в `rp_gant.events.dlq.{notification,audit,sync}`; `kafka-init` создаёт DLQ и replay topics, Prometheus рассчитывает `dlq_size` и алертит при непустом DLQ. Dry-run и approval-gated replay доступны для Audit/Notification/Sync через `pnpm dlq:replay`; каждый consumer получает только свой replay topic, а Sync проверяет `event_id` через отдельную БД `rp_gant_sync`. Инструкция — в P0/20.
 
 ## Данные и миграция
 
 - `db-init` идемпотентен: повторный `up` не требует ручных миграций.
 - `pnpm local:backup` сохраняет дампы всех БД в `backups/`.
 - `pnpm local:restore -- backups/<file>.sql` восстанавливает дамп.
-- `pnpm local:verify-restore` проверяет восстановление в отдельном контейнере.
+- `pnpm local:verify-restore` сохраняет дампы всех пяти БД и восстанавливает их во временный Postgres-контейнер, не изменяя активные БД; drill сравнивает counts контрольных таблиц до/после, поэтому запускайте его без параллельных изменений данных.
 - После перехода с `smart-oati` volumes называются `rp-gant_*`, а БД — `rp_gant_*`.
   Порядок переноса описан в [`docs/MIGRATION-rp-gant.md`](../../docs/MIGRATION-rp-gant.md).
 

@@ -6,7 +6,7 @@ PGUSER="${PGUSER:-rp_gant}"
 PGPASSWORD="${PGPASSWORD:-rp_gant_dev}"
 export PGHOST PGUSER PGPASSWORD
 
-for database in rp_gant_project rp_gant_notification rp_gant_audit; do
+for database in rp_gant_project rp_gant_notification rp_gant_audit rp_gant_sync; do
   psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d postgres -c "CREATE DATABASE $database" 2>/dev/null || true
 done
 
@@ -28,6 +28,7 @@ assert_count rp_gant_user "SELECT count(*) FROM access.permissions" 26
 assert_count rp_gant_user "SELECT count(*) FROM access.role_permissions" 72
 assert_count rp_gant_user "SELECT count(*) FROM settings.system_settings" 16
 assert_count rp_gant_audit "SELECT count(*) FROM audit.audit_actions" 64
+assert_count rp_gant_sync "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'events' AND table_name = 'processed_events'" 1
 assert_count rp_gant_project "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'project' AND table_name = 'projects'" 1
 
 psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_user <<'SQL'
