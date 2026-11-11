@@ -27,7 +27,7 @@
 | Проекты и диаграммы | Project Service реализует проекты, диаграммы, направления, задачи, назначения, зависимости, комментарии, календарь, ревизии, импорт и экспорт. Permission-check вызывается в сервисе; `app_admin` видит все проекты без membership, при этом Project Service читает данные только из собственной БД. | `apps/project-service/README.md`, `apps/project-service/src/projects.js`, `apps/user-service/src/auth.js` |
 | Импорт | Импорт адресуется существующим `diagramId`; обработчик в транзакции очищает текущие назначения, комментарии, зависимости, праздники, задачи и направления диаграммы, затем записывает импорт. Preview делает rollback. | `apps/project-service/src/projects.js` (`processDiagramImport`, `StartImport`) |
 | Frontend | `apps/frontend` — Nuxt 3, но `ssr: false`: текущая сборка работает без SSR. Local Compose запускает этот Nuxt SPA; legacy `apps/web` Compose не запускает. Документы, описывающие SSR, относятся к целевой постановке, пока SSR не будет включён в конфигурации. | `apps/frontend/nuxt.config.ts`, `apps/frontend/package.json` |
-| Локальная разработка и CI | Есть Dockerfile приложений, local Compose, GitHub Actions для CI, contract checks, E2E, images/security и Helm charts сервисов/umbrella. Наличие манифестов не является подтверждением проверенного production deployment. | `apps/*/Dockerfile`, `.github/workflows/`, `infrastructure/helm/`, `tools/` |
+| Локальная разработка и CI | Есть Dockerfile приложений, local Compose, GitHub Actions для CI, contract checks, E2E, images/security, Helm charts и VPS Compose. VPS Compose проверяется CI на синтаксис и критичные Sync DB/DLQ/replay wiring; проверенного VPS deployment это не подтверждает. | `apps/*/Dockerfile`, `.github/workflows/`, `infrastructure/helm/`, `infrastructure/vps/`, `tools/` |
 
 ## Проверенные расхождения и ограничения
 
@@ -56,4 +56,5 @@
 - Unit-тесты: 118 passed в 30 файлах. Playwright E2E: 20/20 passed после изоляции remember-me fixture и закрытия admin-сессии в E2E cleanup.
 - `pnpm lint`, `pnpm format:check` и `pnpm test:contract` проходят; contract checker подтверждает 76 paths, 99 operations, 97 mappings, 2 явных исключения, 68 events и 6 proto.
 - Ранее в этой итерации прошли workspace build и Helm lint/render для staging/prod. Для staging render использовались синтетические digest/bootstrap values; это проверка шаблонов, а не реальные credentials или cluster acceptance.
-- Staging и production не развёртывались. Внешние Vault records, Managed Kafka endpoints/ACL, домены/TLS, Managed PostgreSQL и digest артефактов требуют приёмки владельца окружения.
+- VPS Compose прошёл `docker compose config --quiet` с `.env.example`; проверены отдельный `DATABASE_URL_SYNC`, `SYNC_DB`, migration dependency, healthcheck Sync и 6 DLQ/replay topics. Это не запуск на VPS и не тест реальных credentials.
+- Staging и production не развёртывались; staging acceptance и одобрение cutover остаются обязательными. Внешние Vault records, Managed Kafka endpoints/ACL, домены/TLS, Managed PostgreSQL и digest артефактов требуют приёмки владельца окружения.

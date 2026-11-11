@@ -74,6 +74,23 @@ jobs:
       - name: Check bootstrap
         run: sh tools/check-db-bootstrap.sh
 
+  vps-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate VPS Compose configuration
+        run: |
+          set -euo pipefail
+          docker compose --env-file infrastructure/vps/.env.example -f infrastructure/vps/docker-compose.yml config --quiet
+          docker compose --env-file infrastructure/vps/.env.example -f infrastructure/vps/docker-compose.yml config > /tmp/rp-gant-vps-compose.yaml
+          grep -q 'DATABASE_URL_SYNC:' /tmp/rp-gant-vps-compose.yaml
+          grep -q 'SYNC_DB: rp_gant_sync' /tmp/rp-gant-vps-compose.yaml
+          for topic in dlq.notification dlq.audit dlq.sync replay.audit replay.notification replay.sync; do
+            grep -Fq "rp_gant.events.$topic" /tmp/rp-gant-vps-compose.yaml
+          done
+
   helm-templates:
     runs-on: ubuntu-latest
     steps:
@@ -162,7 +179,7 @@ jobs:
 
   ci-required:
     if: always()
-    needs: [quality, db-bootstrap, helm-templates]
+    needs: [quality, db-bootstrap, vps-compose, helm-templates]
     runs-on: ubuntu-latest
     steps:
       - name: Check required jobs
@@ -173,6 +190,10 @@ jobs:
           fi
           if [ "${{ needs.db-bootstrap.result }}" != "success" ]; then
             echo "db-bootstrap failed"
+            exit 1
+          fi
+          if [ "${{ needs.vps-compose.result }}" != "success" ]; then
+            echo "vps-compose failed"
             exit 1
           fi
           if [ "${{ needs.helm-templates.result }}" != "success" ]; then

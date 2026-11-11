@@ -13,6 +13,8 @@
 - Добавлены Prometheus Kafka Exporter, DLQ/outbox alerts и Grafana dashboard panels; restore drill проверяет пять баз, включая Sync ledger.
 - E2E auth-сценарии используют отдельные тестовые учётные записи и завершают admin-сессии, чтобы повторные прогоны не упирались в лимит двух активных сессий seed-администратора.
 - После локальной пересборки `local:health`, restore drill всех пяти БД и полный Playwright E2E (20/20) прошли; unit — 118 тестов. Staging/prod не затрагивались.
+- VPS Compose подключает выделенную `rp_gant_sync`, ждёт `db-init`, проверяет Sync health и создаёт все DLQ/replay topics; CI валидирует sample-config без реальных секретов.
+- VPS deployment runbook закрепляет staging gate, off-host backup и запрет продолжения при непроверенном restore. VPS rollout не выполнялся.
 - Подготовлен staging deployment/acceptance/rollback runbook. Реальный staging/production rollout не выполнялся.
 
 ### Глобальный доступ `app_admin` по ADR-008

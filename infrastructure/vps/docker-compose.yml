@@ -16,7 +16,7 @@ services:
       frontend:
         condition: service_healthy
       sync-service:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "80:80"
     volumes:
@@ -89,8 +89,21 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
+        set -euo pipefail
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
           --topic ${KAFKA_TOPIC} --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC}.dlq.notification --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC}.dlq.audit --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC}.dlq.sync --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC}.replay.audit --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC}.replay.notification --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC}.replay.sync --partitions 3 --replication-factor 1
     mem_limit: 256m
     networks: [rp-gant]
 
@@ -104,6 +117,7 @@ services:
       PROJECT_DB: ${PROJECT_DB}
       NOTIFICATION_DB: ${NOTIFICATION_DB}
       AUDIT_DB: ${AUDIT_DB}
+      SYNC_DB: ${SYNC_DB:-rp_gant_sync}
       PGHOST: postgres
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -145,6 +159,8 @@ services:
       dockerfile: apps/sync-service/Dockerfile
     image: rp-gant/sync-service:local
     depends_on:
+      db-init:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       kafka-init:
@@ -152,11 +168,24 @@ services:
     environment:
       <<: *node-env
       PORT: "8080"
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:?set DATABASE_URL_SYNC in infrastructure/vps/.env}
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC}
       KAFKA_CONSUMER_GROUP_SYNC: sync
+      SYNC_SERVICE_URL: http://127.0.0.1:8080
       SYNC_TOKEN_SECRET: ${SYNC_TOKEN_SECRET}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health/live').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     mem_limit: 160m
     networks: [rp-gant]
 
