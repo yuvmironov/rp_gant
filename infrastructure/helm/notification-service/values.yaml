@@ -28,8 +28,8 @@ service:
 containerPort: 8080
 
 grpc:
-  enabled: false
-  port: 50051
+  enabled: true
+  port: 50052
 
 strategy:
   type: RollingUpdate
@@ -70,6 +70,8 @@ probes:
 env:
   - name: PORT
     value: "8080"
+  - name: GRPC_PORT
+    value: "50052"
   - name: NODE_ENV
     value: "production"
   - name: LOG_LEVEL

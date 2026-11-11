@@ -17,6 +17,162 @@ function invoke(method, request) {
   });
 }
 
+describe('auth email job creation', () => {
+  it('commits registration and its verification email job together', async () => {
+    const transaction = [];
+    const client = {
+      async query(sql, params = []) {
+        transaction.push({ sql, params });
+        if (sql.includes('INSERT INTO access.users'))
+          return { rowCount: 1, rows: [{ id: 'user-1' }] };
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const db = {
+      async connect() {
+        return client;
+      },
+      async query() {
+        return { rowCount: 0, rows: [] };
+      },
+    };
+    const service = createUserImplementation({ db, publicAppUrl: 'https://app.example.com' });
+
+    const { error, response } = await invoke(service.Register, {
+      email: 'person@example.com',
+      password: 'correct horse battery staple',
+      last_name: 'Иванов',
+      first_name: 'Иван',
+      locale: 'ru-RU',
+    });
+
+    expect(error).toBeNull();
+    expect(response).toMatchObject({ user_id: 'user-1', requires_email_verification: true });
+    const tokenIndex = transaction.findIndex(({ sql }) =>
+      sql.includes('INSERT INTO access.email_verification_tokens'),
+    );
+    const jobIndex = transaction.findIndex(({ sql }) =>
+      sql.includes('INSERT INTO jobs.auth_email_jobs'),
+    );
+    const commitIndex = transaction.findIndex(({ sql }) => sql === 'COMMIT');
+    expect(tokenIndex).toBeGreaterThan(-1);
+    expect(jobIndex).toBeGreaterThan(tokenIndex);
+    expect(jobIndex).toBeLessThan(commitIndex);
+    expect(transaction[jobIndex].params.slice(0, 4)).toEqual([
+      'user-1',
+      null,
+      'person@example.com',
+      'email_verification',
+    ]);
+  });
+
+  it('commits a new project invitation and its email job together', async () => {
+    const transaction = [];
+    const invitationRow = {
+      id: 'invitation-1',
+      project_id: 'project-1',
+      email: 'invitee@example.com',
+      role_code: 'project_editor',
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      accepted_at: null,
+      revoked_at: null,
+      invited_by_user_id: 'actor-1',
+    };
+    const client = {
+      async query(sql, params = []) {
+        transaction.push({ sql, params });
+        if (sql.includes('SELECT * FROM access.users')) return { rowCount: 0, rows: [] };
+        if (sql.includes('SELECT * FROM access.invitations')) return { rowCount: 0, rows: [] };
+        if (sql.includes('INSERT INTO access.invitations')) {
+          return { rowCount: 1, rows: [invitationRow] };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const db = {
+      async connect() {
+        return client;
+      },
+      async query(sql) {
+        if (sql.includes('FROM access.project_memberships m')) {
+          return { rowCount: 1, rows: [{}] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+    const service = createUserImplementation({ db, publicAppUrl: 'https://app.example.com' });
+
+    const { error, response } = await invoke(service.CreateInvitation, {
+      project_id: 'project-1',
+      email: 'Invitee@example.com',
+      role: 'PROJECT_ROLE_EDITOR',
+      actor_user_id: 'actor-1',
+    });
+
+    expect(error).toBeNull();
+    expect(response.invitation.email).toBe('invitee@example.com');
+    const invitationIndex = transaction.findIndex(({ sql }) =>
+      sql.includes('INSERT INTO access.invitations'),
+    );
+    const jobIndex = transaction.findIndex(({ sql }) =>
+      sql.includes('INSERT INTO jobs.auth_email_jobs'),
+    );
+    const commitIndex = transaction.findIndex(({ sql }) => sql === 'COMMIT');
+    expect(jobIndex).toBeGreaterThan(invitationIndex);
+    expect(jobIndex).toBeLessThan(commitIndex);
+    expect(transaction[jobIndex].params.slice(0, 4)).toEqual([
+      null,
+      'invitation-1',
+      'invitee@example.com',
+      'project_invitation',
+    ]);
+  });
+
+  it('stores a password-reset message job without sending SMTP in the request handler', async () => {
+    const queries = [];
+    const db = {
+      async connect() {
+        return {
+          async query(sql, params = []) {
+            queries.push({ sql, params });
+            if (sql.includes('SELECT * FROM access.users')) {
+              return {
+                rowCount: 1,
+                rows: [
+                  { id: 'user-1', email: 'person@example.com', locale: 'ru-RU', status: 'active' },
+                ],
+              };
+            }
+            return { rowCount: 1, rows: [] };
+          },
+          release() {},
+        };
+      },
+    };
+    const service = createUserImplementation({ db, publicAppUrl: 'https://app.example.com' });
+
+    const { error, response } = await invoke(service.RequestPasswordReset, {
+      email: 'PERSON@example.com',
+    });
+
+    expect(error).toBeNull();
+    expect(response).toEqual({ accepted: true });
+    const job = queries.find(({ sql }) => sql.includes('INSERT INTO jobs.auth_email_jobs'));
+    expect(job.params.slice(0, 4)).toEqual([
+      'user-1',
+      null,
+      'person@example.com',
+      'password_reset',
+    ]);
+    expect(JSON.parse(job.params[4])).toMatchObject({
+      link: expect.stringMatching(/^https:\/\/app\.example\.com\/login\?reset=/),
+    });
+    expect(job.params[5]).toBe('ru-RU');
+  });
+});
+
 describe('session expiration', () => {
   it('revokes an expired non-remembered session when it is next validated', async () => {
     const queries = [];

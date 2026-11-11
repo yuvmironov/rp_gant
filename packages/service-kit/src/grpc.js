@@ -17,7 +17,13 @@ function getNested(root, path) {
   return path.split('.').reduce((value, key) => value?.[key], root);
 }
 
-export function loadGrpcService({ protoPath, includeDirs = [], packageName, serviceName }) {
+export function loadGrpcService({
+  protoPath,
+  includeDirs = [],
+  packageName,
+  serviceName,
+  json = false,
+}) {
   const definition = loadSync(protoPath, {
     includeDirs,
     keepCase: true,
@@ -25,6 +31,7 @@ export function loadGrpcService({ protoPath, includeDirs = [], packageName, serv
     enums: String,
     defaults: false,
     oneofs: true,
+    json,
   });
   const packageDefinition = loadPackageDefinition(definition);
   const service = getNested(packageDefinition, packageName)?.[serviceName];
@@ -50,12 +57,14 @@ export function createGrpcClient({
   packageName,
   serviceName,
   address,
+  json = false,
 }) {
   const service = loadGrpcService({
     protoPath,
     includeDirs,
     packageName,
     serviceName,
+    json,
   });
 
   return new service(address, credentials.createInsecure());
@@ -83,12 +92,14 @@ export async function startGrpcServer({
   implementation,
   host = '0.0.0.0',
   port = 50051,
+  json = false,
 }) {
   const service = loadGrpcService({
     protoPath,
     includeDirs,
     packageName,
     serviceName,
+    json,
   });
   const healthService = loadGrpcService({
     protoPath: healthProtoPath,

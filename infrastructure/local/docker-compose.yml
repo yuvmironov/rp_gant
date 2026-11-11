@@ -254,6 +254,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-rp_gant.events}
       KAFKA_CONSUMER_GROUP_NOTIFICATION: notification
+      GRPC_PORT: "50052"
       USER_SERVICE_GRPC: user-service:50051
       SMTP_URL: smtp://mailpit:1025
       SMTP_FROM: RP Gant <no-reply@rp-gant.local>
@@ -306,8 +307,7 @@ services:
       DATABASE_URL: ${DATABASE_URL_USER}
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-rp_gant.events}
-      SMTP_URL: smtp://mailpit:1025
-      SMTP_FROM: RP Gant <no-reply@rp-gant.local>
+      NOTIFICATION_SERVICE_GRPC: notification-service:50052
       PUBLIC_APP_URL: https://app.rp-gant.localhost
       DEV_AUTO_VERIFY: ${DEV_AUTO_VERIFY:-true}
       DEV_ADMIN_EMAIL: ${DEV_ADMIN_EMAIL:-}

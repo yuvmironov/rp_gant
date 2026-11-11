@@ -2,6 +2,14 @@
 
 Этот файл фиксирует изменения кода и поведения приложения. История изменений исходных требований ведётся отдельно в [`docs/requirements/changelog.md`](docs/requirements/changelog.md).
 
+## Unreleased
+
+### Auth-письма по ADR-010
+
+- User Service создаёт durable `auth_email_jobs` вместе с auth-операциями и передаёт их в Notification Service по gRPC с повторными попытками.
+- Notification Service идемпотентно принимает задания, рендерит verification/reset/activation/invitation шаблоны, отправляет SMTP и сохраняет журнал попыток с backoff.
+- SMTP-конфигурация удалена из User Service; local mail доставляет Notification Service через Mailpit. Production rollout не выполнялся.
+
 ## 2026-11-10
 
 ### Исправления входа — PR #142

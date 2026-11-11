@@ -297,12 +297,12 @@
 - In-app уведомления, email по задачам, напоминания и Telegram остаются R2/R3.
 - Полная матрица уведомлений P0/05 включается позже, но контракт `SendAuthEmail` стабилен с MVP.
 
-**Статус реализации:** это решение не реализовано: User Service отправляет auth-письма напрямую своим SMTP mailer; вызов Notification Service по gRPC и таблица `auth_email_jobs` не обнаружены. См. `docs/IMPLEMENTATION-STATUS.md`.
+**Статус реализации:** реализовано в коде User/Notification Service; staging acceptance и runtime-проверка SMTP пока не подтверждены. Фактическое покрытие и остающиеся эксплуатационные проверки перечислены в `docs/IMPLEMENTATION-STATUS.md`.
 
 **Последствия:**
 
 - Notification Service входит в MVP-инфраструктуру и CI/CD.
-- Нужны миграция `0003_notification.sql`, SMTP-конфиг и шаблоны.
+- Нужны миграции User Access / Notification, SMTP-конфиг у Notification Service и шаблоны.
 - Auth-сценарии зависят от доступности Notification Service; ошибки доставки не должны ломать регистрацию, но письмо должно быть повторено.
 - Локально используется Mailpit, реальный SMTP не требуется.
 

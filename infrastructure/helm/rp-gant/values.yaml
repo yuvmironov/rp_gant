@@ -9,6 +9,7 @@ project-service:
   replicaCount: 2
 notification-service:
   replicaCount: 1
+  fullnameOverride: notification-service
 audit-service:
   replicaCount: 1
 sync-service:

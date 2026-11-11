@@ -26,6 +26,7 @@ apply_seed() {
 
 apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0001_user_access.sql"
 apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0002_session_idle_expiration.sql"
+apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0003_auth_email_job_delivery.sql"
 apply_seed "$USER_DB" "$DB_ROOT/seeds/user_access/001_roles_permissions.sql"
 apply_seed "$USER_DB" "$DB_ROOT/seeds/user_access/002_system_settings.sql"
 
@@ -34,5 +35,6 @@ apply_migration "$PROJECT_DB" "$DB_ROOT/migrations/project_diagram/0005_task_sta
 apply_migration "$PROJECT_DB" "$DB_ROOT/migrations/project_diagram/0006_direction_to_task_dependency_forbidden.sql"
 apply_migration "$PROJECT_DB" "$DB_ROOT/migrations/project_diagram/0007_task_estimated_hours.sql"
 apply_migration "$NOTIFICATION_DB" "$DB_ROOT/migrations/notification/0003_notification.sql"
+apply_migration "$NOTIFICATION_DB" "$DB_ROOT/migrations/notification/0004_auth_email_delivery_queue.sql"
 apply_migration "$AUDIT_DB" "$DB_ROOT/migrations/audit/0004_audit.sql"
 apply_seed "$AUDIT_DB" "$DB_ROOT/seeds/audit/003_audit_actions.sql"

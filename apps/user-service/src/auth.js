@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import { getActorRoles, queueUserEvent } from './events.js';
-import { createMailer } from './mailer.js';
 import { status } from '@grpc/grpc-js';
 
 const SESSION_ABSOLUTE_MS = 60 * 60 * 1000;
@@ -232,8 +231,24 @@ function resetLink(publicAppUrl, token) {
   return `${publicAppUrl.replace(/\/$/, '')}/login?reset=${encodeURIComponent(token)}`;
 }
 
-async function sendMail(mailer, message) {
-  await mailer.send(message).catch(() => false);
+async function queueAuthEmail(
+  queryable,
+  { userId, invitationId, email, templateCode, variables, locale = 'ru-RU', expiresAt },
+) {
+  await queryable.query(
+    `INSERT INTO jobs.auth_email_jobs
+       (user_id, invitation_id, recipient_email, template_code, variables, locale, expires_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+    [
+      userId ?? null,
+      invitationId ?? null,
+      normalizeEmail(email),
+      templateCode,
+      JSON.stringify(variables ?? {}),
+      locale,
+      expiresAt,
+    ],
+  );
 }
 
 const telegramCodes = new Map();
@@ -368,7 +383,6 @@ export async function ensureDevAdmin(db, env = process.env) {
 export function createUserImplementation({
   db,
   devAutoVerify = false,
-  mailer = createMailer(),
   publicAppUrl = process.env.PUBLIC_APP_URL ?? 'https://app.rp-gant.localhost',
 }) {
   return {
@@ -421,16 +435,23 @@ export function createUserImplementation({
           ],
         );
         const userId = result.rows[0].id;
-        let verificationToken = null;
-
         if (!devAutoVerify) {
           const token = randomToken();
-          verificationToken = token;
           await client.query(
             `INSERT INTO access.email_verification_tokens (user_id, token_hash, expires_at)
              VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
             [userId, hashToken(token), EMAIL_VERIFICATION_MS],
           );
+          await queueAuthEmail(client, {
+            userId,
+            email,
+            templateCode: 'email_verification',
+            variables: {
+              link: `${publicAppUrl.replace(/\/$/, '')}/?verify=${encodeURIComponent(token)}`,
+            },
+            locale,
+            expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_MS),
+          });
         }
 
         await client.query('COMMIT');
@@ -443,13 +464,6 @@ export function createUserImplementation({
           entityId: userId,
           payload: { userId },
         }).catch(() => {});
-        if (verificationToken) {
-          await sendMail(mailer, {
-            to: email,
-            subject: 'Verify your RP Gant email',
-            text: `Verify your email: ${publicAppUrl.replace(/\/$/, '')}/?verify=${encodeURIComponent(verificationToken)}`,
-          });
-        }
         callback(null, {
           user_id: userId,
           requires_email_verification: !devAutoVerify,
@@ -809,29 +823,41 @@ export function createUserImplementation({
         callback(null, { accepted: true });
         return;
       }
+      let client;
       try {
-        const user = await findUserByEmail(db, email);
+        client = await db.connect();
+        await client.query('BEGIN');
+        const user = await findUserByEmail(client, email);
         if (user && !user.email_verified_at) {
           const token = randomToken();
-          await db.query(
+          await client.query(
             `UPDATE access.email_verification_tokens SET used_at = now()
              WHERE user_id = $1 AND used_at IS NULL`,
             [user.id],
           );
-          await db.query(
+          await client.query(
             `INSERT INTO access.email_verification_tokens (user_id, token_hash, expires_at)
              VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
             [user.id, hashToken(token), EMAIL_VERIFICATION_MS],
           );
-          await sendMail(mailer, {
-            to: email,
-            subject: 'Verify your RP Gant email',
-            text: `Verify your email: ${publicAppUrl.replace(/\/$/, '')}/?verify=${encodeURIComponent(token)}`,
+          await queueAuthEmail(client, {
+            userId: user.id,
+            email,
+            templateCode: 'email_verification',
+            variables: {
+              link: `${publicAppUrl.replace(/\/$/, '')}/?verify=${encodeURIComponent(token)}`,
+            },
+            locale: user.locale ?? 'ru-RU',
+            expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_MS),
           });
         }
+        await client.query('COMMIT');
         callback(null, { accepted: true });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -841,29 +867,39 @@ export function createUserImplementation({
         callback(null, { accepted: true });
         return;
       }
+      let client;
       try {
-        const user = await findUserByEmail(db, email);
+        client = await db.connect();
+        await client.query('BEGIN');
+        const user = await findUserByEmail(client, email);
         if (user && user.status === 'active') {
           const token = randomToken();
-          await db.query(
+          await client.query(
             `UPDATE access.password_reset_tokens SET used_at = now()
              WHERE user_id = $1 AND used_at IS NULL`,
             [user.id],
           );
-          await db.query(
+          await client.query(
             `INSERT INTO access.password_reset_tokens (user_id, token_hash, expires_at)
              VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
             [user.id, hashToken(token), PASSWORD_RESET_MS],
           );
-          await sendMail(mailer, {
-            to: email,
-            subject: 'Reset your RP Gant password',
-            text: `Reset your password: ${resetLink(publicAppUrl, token)}`,
+          await queueAuthEmail(client, {
+            userId: user.id,
+            email,
+            templateCode: 'password_reset',
+            variables: { link: resetLink(publicAppUrl, token) },
+            locale: user.locale ?? 'ru-RU',
+            expiresAt: new Date(Date.now() + PASSWORD_RESET_MS),
           });
         }
+        await client.query('COMMIT');
         callback(null, { accepted: true });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -1176,32 +1212,36 @@ export function createUserImplementation({
         callback(grpcError(status.PERMISSION_DENIED, 'project_manage_forbidden'));
         return;
       }
+      let client;
       try {
-        const existing = await findUserByEmail(db, email);
+        client = await db.connect();
+        await client.query('BEGIN');
+        const existing = await findUserByEmail(client, email);
         if (existing) {
-          const current = await db.query(
+          const current = await client.query(
             `SELECT role_code FROM access.project_memberships
              WHERE project_id = $1 AND user_id = $2 AND status = 'active'`,
             [projectId, existing.id],
           );
           if (current.rows[0]?.role_code === 'project_owner') {
+            await client.query('ROLLBACK');
             callback(grpcError(status.ALREADY_EXISTS, 'project_owner_already_member'));
             return;
           }
-          await db.query(
+          await client.query(
             `UPDATE access.invitations SET revoked_at = now()
              WHERE project_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
             [projectId, email],
           );
           const token = randomToken();
-          const invitation = await db.query(
+          const invitation = await client.query(
             `INSERT INTO access.invitations
                (project_id, email, role_code, invited_by_user_id, token_hash, expires_at, accepted_at)
              VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 millisecond'), now())
              RETURNING *`,
             [projectId, email, roleCode, actorUserId, hashToken(token), INVITATION_MS],
           );
-          await db.query(
+          await client.query(
             `INSERT INTO access.project_memberships
                (project_id, user_id, role_code, status, invited_by_user_id, invited_at, joined_at)
              VALUES ($1, $2, $3, 'active', $4, now(), now())
@@ -1211,11 +1251,16 @@ export function createUserImplementation({
                    revoked_at = NULL, revoked_reason = NULL, updated_at = now()`,
             [projectId, existing.id, roleCode, actorUserId],
           );
-          await sendMail(mailer, {
-            to: email,
-            subject: 'You were added to a RP Gant project',
-            text: `You now have access to the project: ${publicAppUrl}`,
+          await queueAuthEmail(client, {
+            userId: existing.id,
+            invitationId: invitation.rows[0].id,
+            email,
+            templateCode: 'project_invitation',
+            variables: { link: `${publicAppUrl.replace(/\/$/, '')}/projects/${projectId}` },
+            locale: existing.locale ?? 'ru-RU',
+            expiresAt: new Date(invitation.rows[0].expires_at),
           });
+          await client.query('COMMIT');
           await queueUserEvent(db, {
             aggregateType: 'project',
             aggregateId: projectId,
@@ -1230,32 +1275,35 @@ export function createUserImplementation({
         }
 
         const token = randomToken();
-        const current = await db.query(
+        const current = await client.query(
           `SELECT * FROM access.invitations
            WHERE project_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
           [projectId, email],
         );
         const invitation =
           current.rowCount > 0
-            ? await db.query(
+            ? await client.query(
                 `UPDATE access.invitations
                  SET role_code = $2, invited_by_user_id = $3, token_hash = $4,
                      expires_at = now() + ($5 * interval '1 millisecond')
                  WHERE id = $1 RETURNING *`,
                 [current.rows[0].id, roleCode, actorUserId, hashToken(token), INVITATION_MS],
               )
-            : await db.query(
+            : await client.query(
                 `INSERT INTO access.invitations
                    (project_id, email, role_code, invited_by_user_id, token_hash, expires_at)
                  VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 millisecond'))
                  RETURNING *`,
                 [projectId, email, roleCode, actorUserId, hashToken(token), INVITATION_MS],
               );
-        await sendMail(mailer, {
-          to: email,
-          subject: 'Invitation to RP Gant',
-          text: `Accept the project invitation: ${invitationLink(publicAppUrl, token)}`,
+        await queueAuthEmail(client, {
+          invitationId: invitation.rows[0].id,
+          email,
+          templateCode: 'project_invitation',
+          variables: { link: invitationLink(publicAppUrl, token) },
+          expiresAt: new Date(invitation.rows[0].expires_at),
         });
+        await client.query('COMMIT');
         await queueUserEvent(db, {
           aggregateType: 'project',
           aggregateId: projectId,
@@ -1267,7 +1315,10 @@ export function createUserImplementation({
         }).catch(() => {});
         callback(null, { invitation: toInvitation(invitation.rows[0]) });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -1297,6 +1348,7 @@ export function createUserImplementation({
     async ResendInvitation(call, callback) {
       const invitationId = String(call.request.invitation_id ?? '');
       const actorUserId = String(call.request.actor_user_id ?? '');
+      let client;
       try {
         const current = await db.query('SELECT * FROM access.invitations WHERE id = $1', [
           invitationId,
@@ -1314,18 +1366,23 @@ export function createUserImplementation({
           return;
         }
         const token = randomToken();
-        const result = await db.query(
+        client = await db.connect();
+        await client.query('BEGIN');
+        const result = await client.query(
           `UPDATE access.invitations
            SET token_hash = $2, expires_at = now() + ($3 * interval '1 millisecond'),
                invited_by_user_id = $4
            WHERE id = $1 RETURNING *`,
           [invitationId, hashToken(token), INVITATION_MS, actorUserId],
         );
-        await sendMail(mailer, {
-          to: result.rows[0].email,
-          subject: 'Invitation to RP Gant',
-          text: `Accept the project invitation: ${invitationLink(publicAppUrl, token)}`,
+        await queueAuthEmail(client, {
+          invitationId: result.rows[0].id,
+          email: result.rows[0].email,
+          templateCode: 'project_invitation',
+          variables: { link: invitationLink(publicAppUrl, token) },
+          expiresAt: new Date(result.rows[0].expires_at),
         });
+        await client.query('COMMIT');
         await queueUserEvent(db, {
           aggregateType: 'project',
           aggregateId: result.rows[0].project_id,
@@ -1337,7 +1394,10 @@ export function createUserImplementation({
         }).catch(() => {});
         callback(null, { invitation: toInvitation(result.rows[0]) });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -1808,12 +1868,15 @@ export function createUserImplementation({
            VALUES ($1, $2, now() + interval '1 hour')`,
           [userId, hashToken(token)],
         );
-        await client.query('COMMIT');
-        await sendMail(mailer, {
-          to: email,
-          subject: 'RP Gant account created',
-          text: `Set your password: ${resetLink(publicAppUrl, token)}`,
+        await queueAuthEmail(client, {
+          userId,
+          email,
+          templateCode: 'account_activation',
+          variables: { link: resetLink(publicAppUrl, token) },
+          locale: String(call.request.locale ?? 'ru-RU'),
+          expiresAt: new Date(Date.now() + PASSWORD_RESET_MS),
         });
+        await client.query('COMMIT');
         await queueUserEvent(db, {
           aggregateType: 'user',
           aggregateId: userId,
