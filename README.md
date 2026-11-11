@@ -165,7 +165,7 @@ tools/                 # проверки контрактов
 - [x] Vue Gantt: task/direction CRUD, назначения, прогресс, комментарии, зависимости с правилами типов и стилями, календарь, импорт/экспорт, realtime, drag-and-drop, создание проекта/диаграммы/направления, weekend shading, toast-уведомления, расчёт окончания задачи по часам (8 ч/день).
 - [x] Notification, Audit и Sync services.
 - [x] Helm charts для сервисов и umbrella values для staging/prod.
-- [x] VPS Compose подключает отдельную Sync DB, миграцию ledger и Kafka DLQ/replay topics; CI проверяет шаблонную конфигурацию. Production rollout ожидает staging acceptance.
+- [x] VPS Compose подключает отдельную Sync DB, миграцию ledger и Kafka DLQ/replay topics; CI проверяет шаблонную конфигурацию. Production VPS обновлён 2026-11-11 до `b75c853`.
 - [x] Playwright E2E, 20 сценариев: auth, remember me, admin roles, Gantt, dependency rules/link mode, bar drag, task hours, import, members, notifications, profile и password reset.
 - [x] Security headers, CSP, API rate limiting и auth audit events.
 - [x] Project members, invitations, password reset/change и resend verification.
@@ -181,9 +181,9 @@ tools/                 # проверки контрактов
 - [x] Outbox retry/DLQ и approval-gated replay для Audit/Notification/Sync; Sync хранит replay dedup markers в отдельной `rp_gant_sync` DB.
 - [x] Restore drill пяти service DB, включая Sync ledger.
 - [x] Staging-only Helm values, per-service Vault references, opt-in Sync migration и Managed Kafka TLS/SASL config; staging render проверяется CI с digest/bootstrap guard.
-- [ ] Staging rollout и real-cluster acceptance; требуются реальные Vault records, private bootstrap endpoints, TLS/DNS и immutable image digests.
+- [ ] Kubernetes staging rollout и runtime cluster acceptance; владельцем staging gate принят, но managed-cluster deployment и реальные Vault/Kafka integration tests в этой итерации не выполнялись.
 
-Последняя локальная проверка hardening-сборки (2026-11-11): Compose пересобран и переразвернут; `local:health` подтвердил app/sync/mail, `local:verify-restore` прошёл для всех пяти БД. Полный E2E и повторные статические проверки записаны в `docs/IMPLEMENTATION-STATUS.md`. Staging и production не развёртывались.
+Локальные проверки прошли; production VPS обновлён до `b75c853`. Внешние app/Sync health вернули 200, backup всех пяти БД восстановлен в изолированной проверке. Сводка и оставшиеся ограничения — в `docs/IMPLEMENTATION-STATUS.md`. Аутентифицированный WebSocket `101` отдельно не проверялся.
 
 ## Observability
 
