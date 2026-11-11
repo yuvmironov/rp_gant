@@ -35,4 +35,6 @@ test('app_admin can list a project without membership', async ({ page }) => {
   await page.locator('#login-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible();
   await expect(page.locator('.project-row').filter({ hasText: projectName })).toBeVisible();
+  await page.getByRole('button', { name: 'Выйти' }).click();
+  await expect(page.locator('#auth-view')).toBeVisible();
 });
