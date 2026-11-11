@@ -26,7 +26,7 @@ COPY --from=deps --chown=app:app /app/packages/service-kit/node_modules ./packag
 COPY --from=deps --chown=app:app /app/apps/notification-service/node_modules ./apps/notification-service/node_modules
 
 USER 10001
-EXPOSE 8080
+EXPOSE 8080 50052
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/health/live >/dev/null || exit 1

@@ -40,6 +40,7 @@
 - `notification-service` обрабатывает Kafka-события и предоставляет внутренний HTTP API; публичные маршруты проходят через API Gateway.
 - WebSocket `/ws/notifications` **не реализован**; контракт `notifications/asyncapi.yaml` имеет статус planned.
 - Фронтенд загружает уведомления через REST API.
+- Auth-письма передаются User Service в Notification Service через gRPC `SendAuthEmail`; `job_id` обеспечивает идемпотентную постановку в delivery queue. Доставка/статус доступны через `GetAuthEmailStatus`; staging acceptance не выполнена.
 
 ## Проверки
 

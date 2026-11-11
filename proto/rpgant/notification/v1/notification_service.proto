@@ -13,7 +13,9 @@ service NotificationService {
   rpc MarkAllRead(MarkAllReadRequest) returns (MarkAllReadResponse);
   rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
   rpc UpdatePreferences(UpdatePreferencesRequest) returns (UpdatePreferencesResponse);
+  // Idempotently persists an authentication email delivery keyed by job_id.
   rpc SendAuthEmail(SendAuthEmailRequest) returns (SendAuthEmailResponse);
+  // Returns the durable delivery state for an authentication email job.
   rpc GetAuthEmailStatus(GetAuthEmailStatusRequest) returns (GetAuthEmailStatusResponse);
   rpc GetDeliveryLog(GetDeliveryLogRequest) returns (GetDeliveryLogResponse);
   rpc GetDeliveryStats(GetDeliveryStatsRequest) returns (GetDeliveryStatsResponse);
@@ -147,6 +149,7 @@ message UpdatePreferencesResponse {
 }
 
 message SendAuthEmailRequest {
+  // User Service job UUID; retries must reuse the same ID.
   string job_id = 1;
   string user_id = 2;
   string invitation_id = 3;
@@ -154,6 +157,7 @@ message SendAuthEmailRequest {
   string template_code = 5;
   google.protobuf.Struct variables = 6;
   string locale = 7;
+  google.protobuf.Timestamp expires_at = 8;
 }
 
 message SendAuthEmailResponse {
