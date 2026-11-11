@@ -1262,8 +1262,9 @@ export function createProjectImplementation({ db, userClient }) {
         });
         const ids = (accessible.items ?? []).map((item) => item.project_id);
         const roles = new Map((accessible.items ?? []).map((item) => [item.project_id, item.role]));
+        const isAdmin = Boolean(accessible.is_admin);
 
-        if (ids.length === 0) {
+        if (ids.length === 0 && !isAdmin) {
           callback(null, {
             items: [],
             page: { total: 0, limit, offset },
@@ -1281,17 +1282,17 @@ export function createProjectImplementation({ db, userClient }) {
           `SELECT p.*, count(d.id)::int AS diagrams_count
            FROM project.projects p
            LEFT JOIN project.diagrams d ON d.project_id = p.id AND d.deleted_at IS NULL
-           WHERE p.id = ANY($1::uuid[]) AND p.status = $4
+           WHERE ($1::boolean OR p.id = ANY($2::uuid[])) AND p.status = $5
            GROUP BY p.id
            ORDER BY p.updated_at DESC
-           LIMIT $2 OFFSET $3`,
-          [ids, limit, offset, status],
+           LIMIT $3 OFFSET $4`,
+          [isAdmin, ids, limit, offset, status],
         );
         const count = await db.query(
           `SELECT count(*)::int AS total
            FROM project.projects
-           WHERE id = ANY($1::uuid[]) AND status = $2`,
-          [ids, status],
+           WHERE ($1::boolean OR id = ANY($2::uuid[])) AND status = $3`,
+          [isAdmin, ids, status],
         );
         const ownerIds = [...new Set(result.rows.map((row) => row.owner_user_id).filter(Boolean))];
         const ownerResponse = ownerIds.length

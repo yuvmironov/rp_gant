@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Глобальный доступ `app_admin` по ADR-008
+
+- User Service сообщает отдельный `is_admin` flag в `ListAccessibleProjectIds`; Project Service возвращает все проекты администратору, не запрашивая данные напрямую из User DB.
+- Добавлены regression tests для администратора без membership и для сохранения 403 на прямом серверном вызове без permission.
+
 ### Auth-письма по ADR-010
 
 - User Service создаёт durable `auth_email_jobs` вместе с auth-операциями и передаёт их в Notification Service по gRPC с повторными попытками.

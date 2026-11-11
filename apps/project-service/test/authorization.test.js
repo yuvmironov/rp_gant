@@ -1,0 +1,137 @@
+import { describe, expect, it } from 'vitest';
+import { createProjectImplementation } from '../src/projects.js';
+
+function invoke(method, request, actorUserId = 'user-1') {
+  const metadata = { get: (key) => (key === 'x-actor-user-id' ? [actorUserId] : []) };
+  return new Promise((resolve) =>
+    method({ request, metadata }, (error, response) => resolve({ error, response })),
+  );
+}
+
+function projectRow(id, ownerUserId = 'owner-1') {
+  const now = new Date('2026-01-01T00:00:00.000Z');
+  return {
+    id,
+    name: `Project ${id}`,
+    description: '',
+    owner_user_id: ownerUserId,
+    status: 'active',
+    settings: {},
+    created_by_user_id: ownerUserId,
+    updated_by_user_id: ownerUserId,
+    created_at: now,
+    updated_at: now,
+    archived_at: null,
+    deleted_at: null,
+    purge_after: null,
+    diagrams_count: 0,
+  };
+}
+
+function userClient({ accessible, permission = { allowed: false } }) {
+  return {
+    ListAccessibleProjectIds(_request, callback) {
+      callback(null, accessible);
+    },
+    GetUsersByIds(_request, callback) {
+      callback(null, { items: [] });
+    },
+    CheckProjectPermission(_request, callback) {
+      callback(null, permission);
+    },
+  };
+}
+
+describe('Project Service authorization', () => {
+  it('lists all projects for app_admin even when User Service returns no memberships', async () => {
+    const queries = [];
+    const rows = [projectRow('project-1'), projectRow('project-2', 'owner-2')];
+    const db = {
+      async query(sql, params) {
+        queries.push({ sql, params });
+        if (sql.includes('SELECT p.*, count(d.id)::int AS diagrams_count')) {
+          return { rowCount: rows.length, rows };
+        }
+        if (sql.includes('SELECT count(*)::int AS total')) {
+          return { rowCount: 1, rows: [{ total: 2 }] };
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      },
+    };
+    const service = createProjectImplementation({
+      db,
+      userClient: userClient({ accessible: { is_admin: true, items: [] } }),
+    });
+
+    const { error, response } = await invoke(service.ListProjects, { user_id: 'admin-1' });
+
+    expect(error).toBeNull();
+    expect(response.items.map((project) => project.id)).toEqual(['project-1', 'project-2']);
+    expect(response.items.map((project) => project.my_role)).toEqual([
+      'PROJECT_ROLE_UNSPECIFIED',
+      'PROJECT_ROLE_UNSPECIFIED',
+    ]);
+    expect(response.page.total).toBe(2);
+    expect(queries[0].sql).toContain('($1::boolean OR p.id = ANY($2::uuid[]))');
+    expect(queries[0].params).toEqual([true, [], 50, 0, 'active']);
+    expect(queries[1].params).toEqual([true, [], 'active']);
+  });
+
+  it('keeps ordinary project listings restricted to IDs returned by User Service', async () => {
+    const projectId = 'project-1';
+    let listQuery;
+    const db = {
+      async query(sql, params) {
+        if (sql.includes('SELECT p.*, count(d.id)::int AS diagrams_count')) {
+          listQuery = { sql, params };
+          return { rowCount: 1, rows: [projectRow(projectId)] };
+        }
+        if (sql.includes('SELECT count(*)::int AS total')) {
+          return { rowCount: 1, rows: [{ total: 1 }] };
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      },
+    };
+    const service = createProjectImplementation({
+      db,
+      userClient: userClient({
+        accessible: {
+          is_admin: false,
+          items: [{ project_id: projectId, role: 'PROJECT_ROLE_OWNER' }],
+        },
+      }),
+    });
+
+    const { error, response } = await invoke(service.ListProjects, { user_id: 'user-1' });
+
+    expect(error).toBeNull();
+    expect(response.items.map((project) => project.id)).toEqual([projectId]);
+    expect(listQuery.params).toEqual([false, [projectId], 50, 0, 'active']);
+  });
+
+  it('enforces project permission server-side before reading the project', async () => {
+    let databaseQueries = 0;
+    const db = {
+      async query() {
+        databaseQueries += 1;
+        return { rowCount: 0, rows: [] };
+      },
+    };
+    const service = createProjectImplementation({
+      db,
+      userClient: userClient({
+        accessible: { is_admin: false, items: [] },
+        permission: { allowed: false },
+      }),
+    });
+
+    const { error } = await invoke(service.GetProject, {
+      project_id: 'private-project',
+      actor_user_id: 'user-1',
+    });
+
+    expect(error.code).toBe(7);
+    expect(error.message).toBe('permission_denied');
+    expect(databaseQueries).toBe(0);
+  });
+});

@@ -444,6 +444,7 @@ message ListAccessibleProjectIdsRequest {
 
 message ListAccessibleProjectIdsResponse {
   repeated rpgant.common.v1.ProjectAccess items = 1;
+  bool is_admin = 2;
 }
 
 message GetProjectAccessRequest {

@@ -751,6 +751,7 @@ export function createUserImplementation({
       }
 
       try {
+        const admin = await isAdmin(db, userId);
         const result = await db.query(
           `SELECT project_id, role_code
            FROM access.project_memberships
@@ -765,6 +766,7 @@ export function createUserImplementation({
             permissions: [],
             is_accessible: true,
           })),
+          is_admin: admin,
         });
       } catch (error) {
         callback(mapDbError(error));
