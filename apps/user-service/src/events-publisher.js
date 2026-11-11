@@ -1,3 +1,4 @@
+import { getKafkaTopic } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
 
 export function startUserOutboxPublisher(db, env = process.env) {
@@ -20,7 +21,7 @@ export function startUserOutboxPublisher(db, env = process.env) {
       for (const row of result.rows) {
         const headers = row.headers ?? {};
         await producer.send({
-          topic: env.KAFKA_TOPIC ?? 'rpgant.events',
+          topic: getKafkaTopic(env),
           messages: [
             {
               key: row.aggregate_id,

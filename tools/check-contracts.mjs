@@ -27,9 +27,59 @@ const operations = paths.reduce(
     total + Object.keys(openapi.paths[path]).filter((key) => methods.has(key)).length,
   0,
 );
+const operationIds = paths.flatMap((path) =>
+  Object.entries(openapi.paths[path])
+    .filter(([method]) => methods.has(method))
+    .map(([, operation]) => operation.operationId)
+    .filter(Boolean),
+);
+const operationIdSet = new Set(operationIds);
+const mappingPath = join(root, 'contracts/rest-grpc-map.yaml');
+const hasMapping = existsSync(mappingPath);
+check(hasMapping, 'REST/gRPC mapping is missing');
+const mappingSource = hasMapping ? readFileSync(mappingPath, 'utf8') : '';
+const mappedOperationIds = [...mappingSource.matchAll(/^ {2}([A-Za-z][A-Za-z0-9_]*):\s*\{/gm)].map(
+  ([, operationId]) => operationId,
+);
+const mappedOperationIdSet = new Set(mappedOperationIds);
+const mappingExceptions = new Map([
+  ['getSyncToken', 'The API Gateway signs a token after validating the user session.'],
+  ['health', 'The health endpoint is owned by the API Gateway.'],
+]);
+const mappingExceptionIds = new Set(mappingExceptions.keys());
+const missingMapping = operationIds.filter(
+  (operationId) => !mappedOperationIdSet.has(operationId) && !mappingExceptionIds.has(operationId),
+);
+const staleMapping = mappedOperationIds.filter((operationId) => !operationIdSet.has(operationId));
 
 check(paths.length === 76, `OpenAPI paths: expected 76, got ${paths.length}`);
 check(operations === 99, `OpenAPI operations: expected 99, got ${operations}`);
+check(operationIds.length === operations, 'Every OpenAPI operation must have an operationId');
+check(
+  operationIdSet.size === operationIds.length,
+  'OpenAPI operationIds must be unique for REST/gRPC mapping',
+);
+check(
+  mappedOperationIdSet.size === mappedOperationIds.length,
+  'REST/gRPC mapping contains duplicate operationIds',
+);
+check(
+  mappingExceptionIds.size === 2 &&
+    [...mappingExceptionIds].every((operationId) => operationIdSet.has(operationId)),
+  'REST/gRPC mapping exceptions must list existing gateway-managed operations',
+);
+check(
+  [...mappingExceptionIds].every((operationId) => !mappedOperationIdSet.has(operationId)),
+  'Gateway-managed REST/gRPC mapping exceptions must not be mapped',
+);
+check(
+  missingMapping.length === 0,
+  `REST/gRPC mapping misses operations: ${missingMapping.join(', ')}`,
+);
+check(
+  staleMapping.length === 0,
+  `REST/gRPC mapping has unknown operations: ${staleMapping.join(', ')}`,
+);
 check(Object.keys(openapi.components?.schemas ?? {}).length === 72, 'OpenAPI schemas: expected 72');
 
 const eventTypes = readJson('events/event-types.json');
@@ -56,7 +106,6 @@ check(
   'Text notification templates: expected 17',
 );
 
-check(existsSync(join(root, 'contracts/rest-grpc-map.yaml')), 'REST/gRPC mapping is missing');
 check(existsSync(join(root, 'openapi/openapi.yaml')), 'openapi.yaml is missing');
 check(
   existsSync(join(root, 'notifications/templates/manifest.json')),
@@ -78,6 +127,8 @@ if (failures.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Contract checks passed: ${paths.length} paths, ${operations} operations, ${eventTypes.events.length} events, ${protoFiles.length} protos.`,
+    `Contract checks passed: ${paths.length} paths, ${operations} operations, ` +
+      `${mappedOperationIds.length} REST/gRPC mappings, ${mappingExceptionIds.size} explicit exclusions, ` +
+      `${eventTypes.events.length} events, ${protoFiles.length} protos.`,
   );
 }

@@ -1,5 +1,5 @@
 import { verifySyncToken } from '@rp-gant/shared';
-import { createService, loadConfig } from '@rp-gant/service-kit';
+import { createService, getSyncTokenSecret, loadConfig } from '@rp-gant/service-kit';
 import { Counter, Gauge } from 'prom-client';
 import { WebSocketServer } from 'ws';
 
@@ -16,7 +16,7 @@ export function buildApp({ env = process.env, logger = true } = {}) {
     logLevel: env.LOG_LEVEL ?? 'info',
     port: 8080,
   });
-  const secret = env.SYNC_TOKEN_SECRET ?? 'local-sync-secret';
+  const secret = getSyncTokenSecret(env);
 
   const wss = new WebSocketServer({ noServer: true });
   const app = createService({

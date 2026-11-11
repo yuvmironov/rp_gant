@@ -164,7 +164,7 @@ tools/                 # проверки контрактов
 - [x] Vue Gantt: task/direction CRUD, назначения, прогресс, комментарии, зависимости с правилами типов и стилями, календарь, импорт/экспорт, realtime, drag-and-drop, создание проекта/диаграммы/направления, weekend shading, toast-уведомления, расчёт окончания задачи по часам (8 ч/день).
 - [x] Notification, Audit и Sync services.
 - [x] Helm charts для сервисов и umbrella values для staging/prod.
-- [x] Playwright E2E, 18 сценариев: auth, admin roles, Gantt, dependency rules/link mode, bar drag, task hours, import, members, notifications, profile и password reset.
+- [x] Playwright E2E, 19 сценариев: auth, remember me, admin roles, Gantt, dependency rules/link mode, bar drag, task hours, import, members, notifications, profile и password reset.
 - [x] Security headers, CSP, API rate limiting и auth audit events.
 - [x] Project members, invitations, password reset/change и resend verification.
 - [x] Global admin roles: создание администратора и повышение существующего пользователя.

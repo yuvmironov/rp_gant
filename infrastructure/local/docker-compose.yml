@@ -177,8 +177,9 @@ services:
       PROJECT_SERVICE_GRPC: project-service:50051
       NOTIFICATION_SERVICE_URL: http://notification-service:8080
       AUDIT_SERVICE_URL: http://audit-service:8080
-      SYNC_TOKEN_SECRET: 
-      RATE_LIMIT_MAX: ${SYNC_TOKEN_SECRET:-local-sync-secret}
+      RPGANT_ENV: local
+      SYNC_TOKEN_SECRET: ${SYNC_TOKEN_SECRET:-local-sync-secret}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
     networks: [rp-gant]
 
   sync-service:
@@ -201,8 +202,9 @@ services:
       KAFKA_TOPIC: ${KAFKA_TOPIC:-rp_gant.events}
       KAFKA_CONSUMER_GROUP_SYNC: sync
       SYNC_SERVICE_URL: http://127.0.0.1:8080
-      SYNC_TOKEN_SECRET: 
-      RATE_LIMIT_MAX: ${SYNC_TOKEN_SECRET:-local-sync-secret}
+      RPGANT_ENV: local
+      SYNC_TOKEN_SECRET: ${SYNC_TOKEN_SECRET:-local-sync-secret}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
     networks: [rp-gant]
 
   audit-service:

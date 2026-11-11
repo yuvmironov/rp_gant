@@ -33,14 +33,14 @@
 
 ## Статус реализации и открытые вопросы
 
-Пункты ниже — результат сверки с репозиторием на 2026-11-10; источники и подробности приведены в [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md).
+Пункты ниже — результат сверки с репозиторием на 2026-11-11; источники и подробности приведены в [`docs/IMPLEMENTATION-STATUS.md`](../../../IMPLEMENTATION-STATUS.md).
 
 - **PLAT-08 / Authorization:** проверки `CheckProjectPermission` в User Service/Project Service и active-user validation владельца в `EnsureProjectOwner` присутствуют в коде (`apps/user-service/src/auth.js`, `apps/project-service/src/projects.js`). Пункт из исходного списка блокеров закрыт по наличию реализации; прогоните unit/integration tests перед release.
 - **ADR-011 / import:** текущая реализация импортирует в переданную диаграмму и заменяет её содержимое в транзакции; preview откатывает транзакцию. Поведение кода зафиксировано, но формальное продуктовое решение ADR-011 не оформлено.
 - **Sync:** требования этого пакета про cookie, subscribe/backfill и notification WebSocket не совпадают с реализованным контрактом. Для текущей интеграции используйте `sync/asyncapi.yaml`; `/ws/notifications` не реализован.
 - **Local/CI/packaging:** Dockerfile приложений, local Compose, CI workflows и Helm charts в репозитории присутствуют. Их наличие не подтверждает успешный production deployment.
-- **PLAT-04/07:** генератор proto `tools/generate-proto.ps1` и contract structure check есть; отдельный OpenAPI client generator, готовый mock server и проверка полноты REST/gRPC mapping не обнаружены. Mapping содержит 97 записей для 99 OpenAPI operations; gateway-managed `health` и `getSyncToken` не маппятся на gRPC.
-- **Kafka:** Compose задаёт `rp_gant.events`, но fallback publishers/consumers — `rpgant.events`; Compose передаёт `KAFKA_TOPIC`, прямые запуски без переменной могут использовать другой topic.
+- **PLAT-04/07:** генератор proto `tools/generate-proto.ps1` и contract structure check есть; отдельный OpenAPI client generator и готовый mock server не обнаружены. Mapping содержит 97 записей для 99 OpenAPI operations; checker проверяет полноту по operationId с явными исключениями gateway-managed `health` и `getSyncToken`, но не семантическую корректность связей.
+- **Kafka:** Compose и service-kit задают единый default `rp_gant.events` для publishers/consumers; `KAFKA_TOPIC` остаётся явным override для всех сервисов.
 - **ADR-010 / auth-email:** User Service отправляет verification/reset письма напрямую через свой SMTP mailer; предусмотренный ADR вызов Notification Service по gRPC и `auth_email_jobs` не обнаружены.
 
 ## Реализационные артефакты

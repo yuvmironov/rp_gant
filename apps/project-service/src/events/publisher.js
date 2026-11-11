@@ -1,8 +1,9 @@
+import { getKafkaTopic } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
 
 export function startOutboxPublisher(db, env = process.env) {
   const brokers = String(env.KAFKA_BROKERS ?? 'kafka:9092').split(',');
-  const topic = env.KAFKA_TOPIC ?? 'rpgant.events';
+  const topic = getKafkaTopic(env);
   const kafka = new Kafka({ clientId: 'project-outbox', brokers, logLevel: logLevel.NOTHING });
   const producer = kafka.producer();
   let stopped = false;

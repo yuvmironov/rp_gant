@@ -17,6 +17,12 @@ afterEach(async () => {
 });
 
 describe('api-gateway', () => {
+  it('requires a configured sync signing secret in production', () => {
+    expect(() => buildApp({ env: { NODE_ENV: 'production' }, logger: false })).toThrow(
+      'sync_token_secret_required',
+    );
+  });
+
   it('serves the versioned health endpoint', async () => {
     const response = await app().inject({ method: 'GET', url: '/api/v1/health' });
 
