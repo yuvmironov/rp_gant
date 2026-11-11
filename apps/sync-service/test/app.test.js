@@ -51,6 +51,12 @@ afterEach(async () => {
 });
 
 describe('sync service', () => {
+  it('requires a configured sync signing secret in production', () => {
+    expect(() => buildApp({ env: { NODE_ENV: 'production' }, logger: false })).toThrow(
+      'sync_token_secret_required',
+    );
+  });
+
   it('rejects connections without a valid token', async () => {
     const app = makeApp();
     await app.listen({ port: 0, host: '127.0.0.1' });

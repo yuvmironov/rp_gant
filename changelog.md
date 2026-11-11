@@ -25,3 +25,13 @@
 - Чекбокс связан с `rememberMe` в запросе входа; снятый флажок создаёт обычную сессию без remember-cookie.
 - При открытии страницы входа после истечения access-сессии фронтенд вызывает `POST /api/v1/auth/restore`; если remember-cookie ещё действителен, пользователь возвращается в проекты без повторного ввода пароля.
 - Обычный выход по-прежнему отзывает сессию и очищает access-, remember- и CSRF-cookie.
+
+## 2026-11-11
+
+### Старт hardening-этапа
+
+- Gateway и Sync Service больше не используют общий `local-sync-secret` вне local/development/test; production startup требует настроенный секрет и отклоняет известный шаблон из `.env.example`.
+- Local Compose теперь передаёт development sync-secret и повышенный `RATE_LIMIT_MAX=1000` для последовательного E2E-набора с общим IP; production-лимит не менялся.
+- Kafka publishers/consumers используют общий fallback `rp_gant.events`, совпадающий с Compose.
+- User и Project outbox publishers сохраняют snapshot `actor_roles` для Audit, включая роль до её изменения у актёра.
+- Contract check сравнивает REST `operationId` с gRPC mapping; единственные явные исключения — gateway-managed `health` и `getSyncToken`.

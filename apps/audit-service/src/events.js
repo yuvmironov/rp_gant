@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { getKafkaTopic } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
 
 export async function startAuditConsumer(db, env = process.env) {
@@ -11,7 +12,7 @@ export async function startAuditConsumer(db, env = process.env) {
     groupId: env.KAFKA_CONSUMER_GROUP_AUDIT ?? 'audit',
   });
   await consumer.connect();
-  await consumer.subscribe({ topic: env.KAFKA_TOPIC ?? 'rpgant.events' });
+  await consumer.subscribe({ topic: getKafkaTopic(env) });
 
   await consumer.run({
     eachMessage: async ({ message }) => {

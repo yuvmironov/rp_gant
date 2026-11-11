@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { status } from '@grpc/grpc-js';
 import { call } from './user-client.js';
-import { queueEvent } from './events/outbox.js';
+import { actorRolesFromPermissionRole, queueEvent } from './events/outbox.js';
 
 function grpcError(code, message) {
   const error = new Error(message);
@@ -1998,7 +1998,12 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.NOT_FOUND, 'direction_not_found'));
           return;
         }
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.create');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.create',
+        );
         const estimatedHours = Number(call_.request.estimated_hours ?? 0);
         if (!Number.isFinite(estimatedHours) || estimatedHours < 0) {
           callback(grpcError(status.INVALID_ARGUMENT, 'invalid_estimated_hours'));
@@ -2081,6 +2086,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: task.id,
           eventType: 'task.created',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: diagram.rows[0].project_id,
           diagramId,
           entityType: 'task',
@@ -2256,7 +2262,12 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.NOT_FOUND, 'comment_entity_not_found'));
           return;
         }
-        await checkPermission(call_, userClient, entity.project_id, 'project.comment.create');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          entity.project_id,
+          'project.comment.create',
+        );
         const result = await db.query(
           `INSERT INTO plan.comments
              (entity_type, entity_id, author_user_id, mentioned_user_ids, body)
@@ -2270,6 +2281,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: comment.id,
           eventType: 'comment.created',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: entity.project_id,
           diagramId: entity.diagram_id,
           entityType,
@@ -2883,7 +2895,12 @@ export function createProjectImplementation({ db, userClient }) {
           `SELECT project_id, day_mode FROM project.diagrams WHERE id = $1`,
           [task.rows[0].diagram_id],
         );
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.edit');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.edit',
+        );
         const current = task.rows[0];
         const hasStart = hasField(call_.request, 'start_date');
         const hasEnd = hasField(call_.request, 'end_date');
@@ -2982,6 +2999,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: taskId,
           eventType: 'task.updated',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: diagram.rows[0].project_id,
           diagramId: result.rows[0].diagram_id,
           entityType: 'task',
@@ -3015,7 +3033,12 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           current.diagram_id,
         ]);
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.edit');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.edit',
+        );
 
         let directionId = hasField(call_.request, 'direction_id')
           ? String(call_.request.direction_id)
@@ -3193,6 +3216,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: taskId,
           eventType: 'task.moved',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: diagram.rows[0].project_id,
           diagramId: current.diagram_id,
           entityType: 'task',
@@ -3227,7 +3251,12 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           task.rows[0].diagram_id,
         ]);
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.edit');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.edit',
+        );
         const requestedProgress = Number(call_.request.progress ?? 0);
         if (!Number.isFinite(requestedProgress)) {
           callback(grpcError(status.INVALID_ARGUMENT, 'invalid_progress'));
@@ -3253,6 +3282,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: taskId,
           eventType: 'task.progress.updated',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: diagram.rows[0].project_id,
           diagramId: task.rows[0].diagram_id,
           entityType: 'task',
@@ -3310,7 +3340,12 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           task.rows[0].diagram_id,
         ]);
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.edit');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.edit',
+        );
         client = await db.connect();
         await client.query('BEGIN');
         await client.query(
@@ -3340,6 +3375,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: taskId,
           eventType: 'task.assignments.changed',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: diagram.rows[0].project_id,
           diagramId: updatedTask.diagram_id,
           entityType: 'task',
@@ -3374,7 +3410,12 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           task.rows[0].diagram_id,
         ]);
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.delete');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.delete',
+        );
         const deleted = await db.query(
           `WITH RECURSIVE subtree AS (
              SELECT id FROM plan.tasks WHERE id = $1 AND deleted_at IS NULL
@@ -3411,6 +3452,7 @@ export function createProjectImplementation({ db, userClient }) {
           aggregateId: taskId,
           eventType: 'task.deleted',
           actorUserId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
           projectId: diagram.rows[0].project_id,
           diagramId: task.rows[0].diagram_id,
           entityType: 'task',

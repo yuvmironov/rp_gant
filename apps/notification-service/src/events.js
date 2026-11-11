@@ -1,3 +1,4 @@
+import { getKafkaTopic } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
 
 export async function enqueueDeliveries(db, notificationId, userId, eventType) {
@@ -32,7 +33,7 @@ export async function startNotificationConsumer(db, userClient, env = process.en
     groupId: env.KAFKA_CONSUMER_GROUP_NOTIFICATION ?? 'notification',
   });
   await consumer.connect();
-  await consumer.subscribe({ topic: env.KAFKA_TOPIC ?? 'rpgant.events' });
+  await consumer.subscribe({ topic: getKafkaTopic(env) });
 
   await consumer.run({
     eachMessage: async ({ message }) => {

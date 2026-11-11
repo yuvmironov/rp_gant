@@ -14,7 +14,7 @@ function unauthorized(reply, request) {
   });
 }
 
-export async function syncRoutes(app, { userClient, env = process.env }) {
+export async function syncRoutes(app, { userClient, secret }) {
   app.get('/api/v1/sync/token', async (request, reply) => {
     const sessionToken = request.cookies['__Host-session'];
     if (!sessionToken) return unauthorized(reply, request);
@@ -31,7 +31,7 @@ export async function syncRoutes(app, { userClient, env = process.env }) {
       const signed = signSyncToken({
         userId: session.user_id,
         projectIds,
-        secret: env.SYNC_TOKEN_SECRET ?? 'local-sync-secret',
+        secret,
       });
       return reply.send({
         token: signed.token,

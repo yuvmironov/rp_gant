@@ -2,7 +2,7 @@ import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import { createService, loadConfig } from '@rp-gant/service-kit';
+import { createService, getSyncTokenSecret, loadConfig } from '@rp-gant/service-kit';
 import { accessRoutes } from './access-routes.js';
 import { adminRoutes } from './admin-routes.js';
 import { extraRoutes } from './extra-routes.js';
@@ -31,6 +31,7 @@ export function buildApp({
     logLevel: env.LOG_LEVEL ?? 'info',
     port: 8080,
   });
+  const syncTokenSecret = getSyncTokenSecret(env);
   const users =
     userClient ??
     createUserClient({
@@ -68,7 +69,7 @@ export function buildApp({
       await instance.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
       await instance.register(authRoutes, { userClient: users });
       await instance.register(accessRoutes, { userClient: users });
-      await instance.register(syncRoutes, { userClient: users, env });
+      await instance.register(syncRoutes, { userClient: users, secret: syncTokenSecret });
       await instance.register(adminRoutes, { userClient: users });
       await instance.register(extraRoutes, { userClient: users });
       await instance.register(projectRoutes, {
