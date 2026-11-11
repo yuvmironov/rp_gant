@@ -14,6 +14,7 @@
 
 - Контракты: `proto/rpgant/**`.
 - 6 proto-файлов: UserService, ProjectService, NotificationService, AuditService, common и events.
+- `ListAccessibleProjectIdsResponse.is_admin` явно передаёт глобальный `app_admin` flag; Project Service использует его для чтения всех проектов из собственной БД без cross-service SQL (ADR-008).
 - REST/gRPC mapping: `contracts/rest-grpc-map.yaml`.
 - В mapping 97 записей. Gateway-managed операции `health` и `getSyncToken` явно исключены; `pnpm test:contract` проверяет все остальные operationId и отсутствие устаревших mapping-ключей.
 - Contract checker проверяет полноту REST/gRPC mapping по operationId с двумя gateway-managed исключениями; он не доказывает семантическую корректность каждой связи.
