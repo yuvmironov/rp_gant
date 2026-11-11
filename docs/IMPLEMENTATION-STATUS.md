@@ -56,5 +56,5 @@
 - Unit-тесты: 118 passed в 30 файлах. Playwright E2E: 20/20 passed после изоляции remember-me fixture и закрытия admin-сессии в E2E cleanup.
 - `pnpm lint`, `pnpm format:check` и `pnpm test:contract` проходят; contract checker подтверждает 76 paths, 99 operations, 97 mappings, 2 явных исключения, 68 events и 6 proto.
 - Ранее в этой итерации прошли workspace build и Helm lint/render для staging/prod. Для staging render использовались синтетические digest/bootstrap values; это проверка шаблонов, а не реальные credentials или cluster acceptance.
-- VPS Compose прошёл `docker compose config --quiet` с `.env.example`; проверены отдельный `DATABASE_URL_SYNC`, `SYNC_DB`, migration dependency, healthcheck Sync и 6 DLQ/replay topics. Это не запуск на VPS и не тест реальных credentials.
+- VPS Compose прошёл `docker compose config --quiet` с `.env.example`; проверены `DATABASE_URL_SYNC` и PG* fallback к выделенной `rp_gant_sync`, `SYNC_DB`, migration dependency, healthcheck Sync и 6 DLQ/replay topics. Это не запуск на VPS и не тест реальных credentials.
 - Staging и production не развёртывались; staging acceptance и одобрение cutover остаются обязательными. Внешние Vault records, Managed Kafka endpoints/ACL, домены/TLS, Managed PostgreSQL и digest артефактов требуют приёмки владельца окружения.

@@ -168,7 +168,12 @@ services:
     environment:
       <<: *node-env
       PORT: "8080"
-      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:?set DATABASE_URL_SYNC in infrastructure/vps/.env}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-}
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${SYNC_DB:-rp_gant_sync}
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC}
       KAFKA_CONSUMER_GROUP_SYNC: sync

@@ -32,7 +32,7 @@ Redis, Mailpit, Kafka UI, mock Telegram, Traefik и мониторинг в эт
 
 1. Убедиться, что staging acceptance пройдена, release commit одобрен, DNS/TLS/SMTP доступны.
 2. Создать `infrastructure/vps/.env` только если его ещё нет, заполнить все placeholder значения и сохранить файл только на VPS. Не вставлять содержимое в Git, CI, чат или логи.
-3. Задать случайный `POSTGRES_PASSWORD` и согласованный пароль во всех `DATABASE_URL_*`, включая `DATABASE_URL_SYNC`; `SYNC_DB=rp_gant_sync`; случайный `SYNC_TOKEN_SECRET`; SMTP-пароль и начальный пароль администратора.
+3. Задать случайный `POSTGRES_PASSWORD` и согласованный пароль во всех явных `DATABASE_URL_*`; `SYNC_DB=rp_gant_sync`; случайный `SYNC_TOKEN_SECRET`; SMTP-пароль и начальный пароль администратора. `DATABASE_URL_SYNC` можно задать явно; если его нет, Compose передаст Sync Service параметры PG подключения из уже имеющихся `POSTGRES_USER`/`POSTGRES_PASSWORD`, направив его в `rp_gant_sync`.
 4. Проверить Compose-конфигурацию командой `config --quiet`; не вызывать `config` без `--quiet` в общем терминале, так как полный вывод содержит переменные окружения.
 5. Для существующего VPS подготовить и проверить off-host backup всех БД и план rollback; для пустой первой установки заранее определить backup target и процедуру восстановления.
 

@@ -87,6 +87,8 @@ jobs:
           docker compose --env-file infrastructure/vps/.env.example -f infrastructure/vps/docker-compose.yml config > /tmp/rp-gant-vps-compose.yaml
           grep -q 'DATABASE_URL_SYNC:' /tmp/rp-gant-vps-compose.yaml
           grep -q 'SYNC_DB: rp_gant_sync' /tmp/rp-gant-vps-compose.yaml
+          grep -q 'PGHOST: postgres' /tmp/rp-gant-vps-compose.yaml
+          grep -q 'PGDATABASE: rp_gant_sync' /tmp/rp-gant-vps-compose.yaml
           for topic in dlq.notification dlq.audit dlq.sync replay.audit replay.notification replay.sync; do
             grep -Fq "rp_gant.events.$topic" /tmp/rp-gant-vps-compose.yaml
           done
