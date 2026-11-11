@@ -2,7 +2,7 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
-> **Статус:** конфигурация готовится; VPS rollout не выполнялся. Не выкатывать production, пока не пройдена и не принята staging-приёмка из [`22_Staging_Deployment_Runbook.md`](../../docs/requirements/system/P0/22_Staging_Deployment_Runbook.md) и владелец явно не разрешил cutover.
+> **Статус:** production VPS обновлён 2026-11-11 до release `b75c853` после подтверждённой владельцем staging-приёмки. Rollout и базовые health/backup checks пройдены; Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
 
 ## Требования
 
@@ -72,7 +72,15 @@ curl -fsS https://app.rp-gant.ru/health
 curl -fsS https://sync.rp-gant.ru/health/live
 ```
 
-Убедиться, что Sync Service имеет статус `healthy` и `db-init` завершился успешно; его миграция создаёт `rp_gant_sync.events.processed_events`. WebSocket `sync.rp-gant.ru` должен отвечать `101 Switching Protocols`.
+Убедиться, что Sync Service имеет статус `healthy` и `db-init` завершился успешно; его миграция создаёт `rp_gant_sync.events.processed_events`. При rollout 2026-11-11 оба внешних health endpoints вернули 200; запрос WebSocket с неверным token был отклонён 401. Успешный аутентифицированный handshake `101 Switching Protocols` отдельно не проверялся.
+
+## Последний rollout
+
+- Release: `b75c853` (`PR #149`), 2026-11-11.
+- `db-init` создал `rp_gant_sync` и применил Sync ledger migration; все пять service DB присутствуют.
+- Healthchecked app containers, external app/Sync health и canonical/DLQ/replay Kafka topics проверены.
+- Full PostgreSQL backup до миграции (4 существовавшие DB) и backup после rollout (5 DB, включая Sync) скопированы off-host и восстановлены в изолированном PostgreSQL.
+- Владелец отметил staging acceptance как пройденную; Kubernetes staging rollout не выполнялся.
 
 ## Начальный администратор
 

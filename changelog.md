@@ -12,10 +12,11 @@
 - Helm staging values задают canonical topic, обязательный bootstrap endpoint, Sync URL/migration и `/ws` ingress; digest/bootstrap guard и Helm render checks включены в required CI. Production Sync DB/security остаются opt-out.
 - Добавлены Prometheus Kafka Exporter, DLQ/outbox alerts и Grafana dashboard panels; restore drill проверяет пять баз, включая Sync ledger.
 - E2E auth-сценарии используют отдельные тестовые учётные записи и завершают admin-сессии, чтобы повторные прогоны не упирались в лимит двух активных сессий seed-администратора.
-- После локальной пересборки `local:health`, restore drill всех пяти БД и полный Playwright E2E (20/20) прошли; unit — 118 тестов. Staging/prod не затрагивались.
+- После локальной пересборки `local:health`, restore drill всех пяти БД и полный Playwright E2E (20/20) прошли; unit — 118 тестов.
 - VPS Compose подключает выделенную `rp_gant_sync`, ждёт `db-init`, проверяет Sync health и создаёт все DLQ/replay topics; CI валидирует sample-config без реальных секретов.
-- VPS deployment runbook закрепляет staging gate, off-host backup и запрет продолжения при непроверенном restore. VPS rollout не выполнялся.
-- Подготовлен staging deployment/acceptance/rollback runbook. Реальный staging/production rollout не выполнялся.
+- Production VPS rollout выполнен 2026-11-11 на release `b75c853` после owner-confirmed staging acceptance: миграции прошли, все контейнеры healthy, внешние app/Sync health — 200, Kafka topics проверены. Pre/post deployment backups восстановлены в изолированной проверке.
+- Внешний WebSocket route отклонил invalid-token handshake кодом 401; authenticated 101 handshake и реальные auth-email/replay события в production не проверялись.
+- Kubernetes staging rollout не выполнялся; prepared staging deployment/acceptance/rollback runbook остаётся для будущего managed-cluster rollout.
 
 ### Глобальный доступ `app_admin` по ADR-008
 
