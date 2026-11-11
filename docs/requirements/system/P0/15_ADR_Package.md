@@ -56,7 +56,7 @@
 - один брокер для всех сервисов;
 - JSON-схемы событий из `events/` и `notifications/`;
 - local Compose: один topic `rp_gant.events`, маршрутизация по `event_type`; разделение по domain topics — только при доказанной необходимости;
-- кодовый fallback для `KAFKA_TOPIC` сейчас `rpgant.events`; Compose передаёт `rp_gant.events`, см. `docs/IMPLEMENTATION-STATUS.md`;
+- кодовый fallback `KAFKA_TOPIC` и Compose используют canonical topic `rp_gant.events`; legacy Helm defaults сохранены до staging-приёмки, см. `docs/IMPLEMENTATION-STATUS.md`;
 - partition key — `projectId` для проектных событий, `userId` для пользовательских;
 - consumer groups — по сервису;
 - DLQ/error topic для каждого consumer group;

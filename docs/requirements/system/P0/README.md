@@ -30,6 +30,7 @@
 | `19_API_Conventions_and_Error_Catalog.md` | REST-конвенции, RFC 7807, idempotency, concurrency, error codes |
 | `20_Messaging_Operations.md` | Kafka topic, partitions, outbox/inbox, retry, DLQ, replay |
 | `21_Test_Data_and_Contract_Mocks.md` | Seed, fixtures, mock server, contract/E2E/load данные |
+| `22_Staging_Deployment_Runbook.md` | Staging rollout, приёмка Sync/DLQ и rollback |
 
 ## Статус реализации и открытые вопросы
 
@@ -40,8 +41,8 @@
 - **Sync:** требования этого пакета про cookie, subscribe/backfill и notification WebSocket не совпадают с реализованным контрактом. Для текущей интеграции используйте `sync/asyncapi.yaml`; `/ws/notifications` не реализован.
 - **Local/CI/packaging:** Dockerfile приложений, local Compose, CI workflows и Helm charts в репозитории присутствуют. Их наличие не подтверждает успешный production deployment.
 - **PLAT-04/07:** генератор proto `tools/generate-proto.ps1` и contract structure check есть; отдельный OpenAPI client generator и готовый mock server не обнаружены. Mapping содержит 97 записей для 99 OpenAPI operations; checker проверяет полноту по operationId с явными исключениями gateway-managed `health` и `getSyncToken`, но не семантическую корректность связей.
-- **Kafka:** Compose и service-kit задают единый default `rp_gant.events` для publishers/consumers; `KAFKA_TOPIC` остаётся явным override для всех сервисов.
-- **ADR-010 / auth-email:** User Service отправляет verification/reset письма напрямую через свой SMTP mailer; предусмотренный ADR вызов Notification Service по gRPC и `auth_email_jobs` не обнаружены.
+- **Kafka:** local runtime использует `rp_gant.events`; staging values задают тот же topic и приватный bootstrap endpoint. Bounded retry/DLQ, подтверждаемый service-specific replay и TLS/SASL wiring подготовлены; реальные Vault records, ACL и Managed Kafka acceptance не проверены.
+- **ADR-010 / auth-email:** User Service атомарно ставит auth-email jobs и с retry передаёт их по gRPC в Notification Service; Notification Service идемпотентно хранит delivery, выполняет SMTP retry и пишет журнал попыток. Runtime acceptance в staging не выполнена.
 
 ## Реализационные артефакты
 

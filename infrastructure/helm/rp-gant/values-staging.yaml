@@ -1,5 +1,5 @@
-﻿global:
-  imageTag: staging
+﻿imagePolicy:
+  requireDigests: true
 frontend:
   ingress:
     hosts:
@@ -15,6 +15,187 @@ api-gateway:
           - path: /
             pathType: Prefix
 platform:
+  migrations:
+    syncDb:
+      enabled: true
+      name: rp_gant_sync
   backup:
     enabled: true
     schedule: "0 2 * * *"
+
+# Secret references only. Image tags/digests are managed separately by the release process.
+user-service:
+  kafkaSecurity:
+    enabled: true
+    bootstrapServers: ""
+    topic: rp_gant.events
+    saslMechanism: scram-sha-512
+    secretName: user-service
+    usernameKey: username
+    passwordKey: password
+    caKey: KAFKA_SSL_CA
+  externalSecret:
+    enabled: true
+    targetSecretName: user-service
+    data:
+      - secretKey: DATABASE_URL
+        remoteRef:
+          key: rp-gant/staging/user-service
+          property: database_url
+      - secretKey: username
+        remoteRef:
+          key: rp-gant/staging/user-service
+          property: kafka_sasl_username
+      - secretKey: password
+        remoteRef:
+          key: rp-gant/staging/user-service
+          property: kafka_sasl_password
+      - secretKey: KAFKA_SSL_CA
+        remoteRef:
+          key: rp-gant/staging/user-service
+          property: kafka_ca_pem
+          optional: true
+
+project-service:
+  kafkaSecurity:
+    enabled: true
+    bootstrapServers: ""
+    topic: rp_gant.events
+    saslMechanism: scram-sha-512
+    secretName: project-service
+    usernameKey: username
+    passwordKey: password
+    caKey: KAFKA_SSL_CA
+  externalSecret:
+    enabled: true
+    targetSecretName: project-service
+    data:
+      - secretKey: DATABASE_URL
+        remoteRef:
+          key: rp-gant/staging/project-service
+          property: database_url
+      - secretKey: username
+        remoteRef:
+          key: rp-gant/staging/project-service
+          property: kafka_sasl_username
+      - secretKey: password
+        remoteRef:
+          key: rp-gant/staging/project-service
+          property: kafka_sasl_password
+      - secretKey: KAFKA_SSL_CA
+        remoteRef:
+          key: rp-gant/staging/project-service
+          property: kafka_ca_pem
+          optional: true
+
+notification-service:
+  kafkaSecurity:
+    enabled: true
+    bootstrapServers: ""
+    topic: rp_gant.events
+    saslMechanism: scram-sha-512
+    secretName: notification-service
+    usernameKey: username
+    passwordKey: password
+    caKey: KAFKA_SSL_CA
+  externalSecret:
+    enabled: true
+    targetSecretName: notification-service
+    data:
+      - secretKey: DATABASE_URL
+        remoteRef:
+          key: rp-gant/staging/notification-service
+          property: database_url
+      - secretKey: username
+        remoteRef:
+          key: rp-gant/staging/notification-service
+          property: kafka_sasl_username
+      - secretKey: password
+        remoteRef:
+          key: rp-gant/staging/notification-service
+          property: kafka_sasl_password
+      - secretKey: KAFKA_SSL_CA
+        remoteRef:
+          key: rp-gant/staging/notification-service
+          property: kafka_ca_pem
+          optional: true
+
+audit-service:
+  kafkaSecurity:
+    enabled: true
+    bootstrapServers: ""
+    topic: rp_gant.events
+    saslMechanism: scram-sha-512
+    secretName: audit-service
+    usernameKey: username
+    passwordKey: password
+    caKey: KAFKA_SSL_CA
+  externalSecret:
+    enabled: true
+    targetSecretName: audit-service
+    data:
+      - secretKey: DATABASE_URL
+        remoteRef:
+          key: rp-gant/staging/audit-service
+          property: database_url
+      - secretKey: username
+        remoteRef:
+          key: rp-gant/staging/audit-service
+          property: kafka_sasl_username
+      - secretKey: password
+        remoteRef:
+          key: rp-gant/staging/audit-service
+          property: kafka_sasl_password
+      - secretKey: KAFKA_SSL_CA
+        remoteRef:
+          key: rp-gant/staging/audit-service
+          property: kafka_ca_pem
+          optional: true
+
+sync-service:
+  ingress:
+    enabled: true
+    className: yandex-alb
+    hosts:
+      - host: api.staging.rp-gant.example.com
+        paths:
+          - path: /ws
+            pathType: Prefix
+  syncDatabase:
+    enabled: true
+    secretName: rp-gant-sync
+    secretKey: DATABASE_URL_SYNC
+  kafkaSecurity:
+    enabled: true
+    bootstrapServers: ""
+    topic: rp_gant.events
+    saslMechanism: scram-sha-512
+    secretName: rp-gant-sync
+    usernameKey: username
+    passwordKey: password
+    caKey: KAFKA_SSL_CA
+  externalSecret:
+    enabled: true
+    targetSecretName: rp-gant-sync
+    data:
+      - secretKey: token
+        remoteRef:
+          key: rp-gant/staging/sync-service
+          property: token
+      - secretKey: DATABASE_URL_SYNC
+        remoteRef:
+          key: rp-gant/staging/sync-service
+          property: database_url
+      - secretKey: username
+        remoteRef:
+          key: rp-gant/staging/sync-service
+          property: kafka_sasl_username
+      - secretKey: password
+        remoteRef:
+          key: rp-gant/staging/sync-service
+          property: kafka_sasl_password
+      - secretKey: KAFKA_SSL_CA
+        remoteRef:
+          key: rp-gant/staging/sync-service
+          property: kafka_ca_pem
+          optional: true

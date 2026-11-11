@@ -1,10 +1,10 @@
-import { getKafkaTopic } from '@rp-gant/service-kit';
+import { getKafkaConnectionOptions, getKafkaTopic } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
 
-export function startUserOutboxPublisher(db, env = process.env) {
+export function startUserOutboxPublisher(db, env = process.env, metrics) {
   const kafka = new Kafka({
     clientId: 'user-outbox',
-    brokers: String(env.KAFKA_BROKERS ?? 'kafka:9092').split(','),
+    ...getKafkaConnectionOptions(env),
     logLevel: logLevel.NOTHING,
   });
   const producer = kafka.producer();
@@ -14,6 +14,17 @@ export function startUserOutboxPublisher(db, env = process.env) {
   async function publish() {
     if (stopped) return;
     try {
+      const outboxStats = await db.query(
+        `SELECT count(*) AS pending,
+                count(*) FILTER (WHERE retry_count > 3) AS retry_exceeded
+         FROM events.outbox_events
+         WHERE published_at IS NULL`,
+      );
+      metrics?.outboxPending.set({ service: 'user' }, Number(outboxStats.rows[0]?.pending ?? 0));
+      metrics?.outboxRetries.set(
+        { service: 'user' },
+        Number(outboxStats.rows[0]?.retry_exceeded ?? 0),
+      );
       await producer.connect();
       const result = await db.query(
         `SELECT * FROM events.outbox_events WHERE published_at IS NULL ORDER BY occurred_at ASC LIMIT 50`,
@@ -48,6 +59,7 @@ export function startUserOutboxPublisher(db, env = process.env) {
         );
       }
     } catch (error) {
+      metrics?.outboxPublishErrors.inc({ service: 'user' });
       await db
         .query(
           `UPDATE events.outbox_events SET retry_count = retry_count + 1, last_error = $1 WHERE published_at IS NULL`,

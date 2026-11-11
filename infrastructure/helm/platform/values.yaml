@@ -3,12 +3,16 @@
   image:
     repository: ghcr.io/yuvmironov/rp-gant/db-migrate
     tag: main
+    digest: ""
     pullPolicy: IfNotPresent
   secretName: platform-database
   userDb: rp_gant_user
   projectDb: rp_gant_project
   notificationDb: rp_gant_notification
   auditDb: rp_gant_audit
+  syncDb:
+    enabled: false
+    name: rp_gant_sync
   backoffLimit: 3
 
 backup:

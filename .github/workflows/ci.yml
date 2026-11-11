@@ -74,9 +74,95 @@ jobs:
       - name: Check bootstrap
         run: sh tools/check-db-bootstrap.sh
 
+  helm-templates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v4.3.1
+
+      - name: Build umbrella dependencies
+        run: helm dependency build infrastructure/helm/rp-gant
+
+      - name: Lint service and platform charts
+        run: |
+          set -euo pipefail
+          for chart in user-service project-service notification-service audit-service; do
+            helm lint "infrastructure/helm/$chart" --set global.imageTag=main
+          done
+          helm lint infrastructure/helm/sync-service --set global.imageTag=main
+          helm lint infrastructure/helm/platform
+
+      - name: Verify production remains opt-out for Sync DB
+        run: |
+          set -euo pipefail
+          helm template rp-gant infrastructure/helm/rp-gant -f infrastructure/helm/rp-gant/values.yaml -f infrastructure/helm/rp-gant/values-prod.yaml > /tmp/rp-gant-production.yaml
+          if grep -q 'name: DATABASE_URL_SYNC' /tmp/rp-gant-production.yaml; then
+            echo "production unexpectedly enables Sync DB secret"
+            exit 1
+          fi
+          if grep -q 'KAFKA_SASL_MECHANISM' /tmp/rp-gant-production.yaml; then
+            echo "production unexpectedly enables staging Kafka security values"
+            exit 1
+          fi
+          grep -A1 'name: SYNC_DB' /tmp/rp-gant-production.yaml | grep -q 'value: ""'
+
+      - name: Lint and render staging values with pinned image digests
+        run: |
+          set -euo pipefail
+          digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          args=(
+            -f infrastructure/helm/rp-gant/values.yaml
+            -f infrastructure/helm/rp-gant/values-staging.yaml
+            --set api-gateway.image.digest="$digest"
+            --set user-service.image.digest="$digest"
+            --set project-service.image.digest="$digest"
+            --set notification-service.image.digest="$digest"
+            --set audit-service.image.digest="$digest"
+            --set sync-service.image.digest="$digest"
+            --set frontend.image.digest="$digest"
+            --set platform.migrations.image.digest="$digest"
+            --set user-service.kafkaSecurity.bootstrapServers=broker.staging.example.com:9092
+            --set project-service.kafkaSecurity.bootstrapServers=broker.staging.example.com:9092
+            --set notification-service.kafkaSecurity.bootstrapServers=broker.staging.example.com:9092
+            --set audit-service.kafkaSecurity.bootstrapServers=broker.staging.example.com:9092
+            --set sync-service.kafkaSecurity.bootstrapServers=broker.staging.example.com:9092
+          )
+          if helm template rp-gant infrastructure/helm/rp-gant -f infrastructure/helm/rp-gant/values.yaml -f infrastructure/helm/rp-gant/values-staging.yaml >/dev/null 2>&1; then
+            echo "staging render unexpectedly accepted missing image digests"
+            exit 1
+          fi
+          if helm template rp-gant infrastructure/helm/rp-gant \
+            -f infrastructure/helm/rp-gant/values.yaml \
+            -f infrastructure/helm/rp-gant/values-staging.yaml \
+            --set api-gateway.image.digest="$digest" \
+            --set user-service.image.digest="$digest" \
+            --set project-service.image.digest="$digest" \
+            --set notification-service.image.digest="$digest" \
+            --set audit-service.image.digest="$digest" \
+            --set sync-service.image.digest="$digest" \
+            --set frontend.image.digest="$digest" \
+            --set platform.migrations.image.digest="$digest" >/dev/null 2>&1; then
+            echo "staging render unexpectedly accepted missing Kafka bootstrap endpoints"
+            exit 1
+          fi
+          helm lint infrastructure/helm/rp-gant "${args[@]}"
+          helm template rp-gant infrastructure/helm/rp-gant "${args[@]}" > /tmp/rp-gant-staging.yaml
+          grep -q 'name: DATABASE_URL_SYNC' /tmp/rp-gant-staging.yaml
+          grep -q 'value: "rp_gant_sync"' /tmp/rp-gant-staging.yaml
+          grep -q 'KAFKA_SASL_MECHANISM' /tmp/rp-gant-staging.yaml
+          grep -q 'value: "broker.staging.example.com:9092"' /tmp/rp-gant-staging.yaml
+          grep -q 'value: "rp_gant.events"' /tmp/rp-gant-staging.yaml
+          grep -q 'rp-gant/staging/sync-service' /tmp/rp-gant-staging.yaml
+          grep -q 'path: /ws' /tmp/rp-gant-staging.yaml
+
   ci-required:
     if: always()
-    needs: [quality, db-bootstrap]
+    needs: [quality, db-bootstrap, helm-templates]
     runs-on: ubuntu-latest
     steps:
       - name: Check required jobs
@@ -87,6 +173,10 @@ jobs:
           fi
           if [ "${{ needs.db-bootstrap.result }}" != "success" ]; then
             echo "db-bootstrap failed"
+            exit 1
+          fi
+          if [ "${{ needs.helm-templates.result }}" != "success" ]; then
+            echo "helm-templates failed"
             exit 1
           fi
           echo "ci ok"

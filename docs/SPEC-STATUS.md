@@ -27,6 +27,7 @@
 - `status: planned` — **38** событий, зарезервированных в каталоге.
 - Реальная схема envelope и producers используют snake_case; User/Project outbox producers передают role snapshot в `actor_roles`. Количество событий (68) не равно числу payload definitions (79 в `payloads.schema.json`).
 - `events/asyncapi.yaml` описывает общий канал; статусы событий указаны в каталоге.
+- Runtime retry/DLQ и manual replay — operational behavior из `docs/requirements/system/P0/20_Messaging_Operations.md`; они не меняют envelope/AsyncAPI контракт. Managed Kafka TLS/SASL конфигурируется вне контракта, staging acceptance ещё не выполнена.
 
 ## WebSocket sync
 
@@ -34,7 +35,9 @@
 - Project scope берётся из claims токена; отдельные subscribe/unsubscribe сообщения не используются.
 - `SYNC_TOKEN_SECRET` обязателен вне local/development/test; локальный Compose явно задаёт development-only секрет, а placeholder `CHANGE_ME_RANDOM_HEX` отклоняется вне local.
 - Сервер отправляет `connected`, `diagram.changed`, `pong` и `error`.
-- Спецификация: `sync/asyncapi.yaml`.
+- Sync consumer записывает `event_id` в `rp_gant_sync.events.processed_events` в одной транзакции с broadcast; replay получает отдельный `.replay.sync` topic и пропускает уже обработанные IDs.
+- Спецификация протокола: `sync/asyncapi.yaml`; replay/deduplication — runtime operations, а не новые WebSocket-сообщения.
+- Helm staging values подготовлены для `DATABASE_URL_SYNC` и Sync migration; реальный staging rollout/acceptance не проводились.
 
 ## Уведомления
 

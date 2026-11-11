@@ -1,5 +1,7 @@
 ﻿global:
   imageTag: main
+imagePolicy:
+  requireDigests: false
 
 api-gateway:
   replicaCount: 2

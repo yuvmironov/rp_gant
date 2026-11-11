@@ -143,6 +143,7 @@ tools/                 # проверки контрактов
 
 - [`docs/MIGRATION-rp-gant.md`](docs/MIGRATION-rp-gant.md) — переход с `smart-oati` на `rp-gant`, перенос БД, volumes, Helm и CI.
 - [`docs/SPEC-STATUS.md`](docs/SPEC-STATUS.md) — состояние REST/gRPC/events/WebSocket-спецификаций.
+- [`docs/requirements/system/P0/22_Staging_Deployment_Runbook.md`](docs/requirements/system/P0/22_Staging_Deployment_Runbook.md) — gates, rollout, acceptance и rollback для staging.
 - [`changelog.md`](changelog.md) — история изменений приложения и реализованных исправлений.
 - [`docs/requirements/README.md`](docs/requirements/README.md) — исходные бизнес- и системные постановки и P0-пакет; changelog требований находится в `docs/requirements/changelog.md`.
 - [`infrastructure/vps/README.md`](infrastructure/vps/README.md) — production-развёртывание и обновление одного VPS за Jino-прокси.
@@ -164,7 +165,7 @@ tools/                 # проверки контрактов
 - [x] Vue Gantt: task/direction CRUD, назначения, прогресс, комментарии, зависимости с правилами типов и стилями, календарь, импорт/экспорт, realtime, drag-and-drop, создание проекта/диаграммы/направления, weekend shading, toast-уведомления, расчёт окончания задачи по часам (8 ч/день).
 - [x] Notification, Audit и Sync services.
 - [x] Helm charts для сервисов и umbrella values для staging/prod.
-- [x] Playwright E2E, 19 сценариев: auth, remember me, admin roles, Gantt, dependency rules/link mode, bar drag, task hours, import, members, notifications, profile и password reset.
+- [x] Playwright E2E, 20 сценариев: auth, remember me, admin roles, Gantt, dependency rules/link mode, bar drag, task hours, import, members, notifications, profile и password reset.
 - [x] Security headers, CSP, API rate limiting и auth audit events.
 - [x] Project members, invitations, password reset/change и resend verification.
 - [x] Global admin roles: создание администратора и повышение существующего пользователя.
@@ -174,15 +175,20 @@ tools/                 # проверки контрактов
 - [x] Session restore, profile editing and local admin user creation.
 - [x] Executor CRUD, user linking, admin user roles, blocking and user lifecycle.
 - [x] Load tests (k6 smoke: 10 VUs, 20s, p95 43 ms, 0 errors).
-- [x] Prometheus metrics, local Grafana dashboards and alerts.
+- [x] Prometheus metrics, local Grafana dashboards and alerts для HTTP, outbox, consumer retry/DLQ и Kafka lag.
 - [x] System settings UI, audit filters and authenticated k6 scenario.
-- [ ] Production staging deploy and real-cluster verification.
+- [x] Outbox retry/DLQ и approval-gated replay для Audit/Notification/Sync; Sync хранит replay dedup markers в отдельной `rp_gant_sync` DB.
+- [x] Restore drill пяти service DB, включая Sync ledger.
+- [x] Staging-only Helm values, per-service Vault references, opt-in Sync migration и Managed Kafka TLS/SASL config; staging render проверяется CI с digest/bootstrap guard.
+- [ ] Staging rollout и real-cluster acceptance; требуются реальные Vault records, private bootstrap endpoints, TLS/DNS и immutable image digests.
+
+Последняя локальная проверка hardening-сборки (2026-11-11): Compose пересобран и переразвернут; `local:health` подтвердил app/sync/mail, `local:verify-restore` прошёл для всех пяти БД. Полный E2E и повторные статические проверки записаны в `docs/IMPLEMENTATION-STATUS.md`. Staging и production не развёртывались.
 
 ## Observability
 
-Все Fastify-сервисы отдают Prometheus-метрики на `/metrics`: количество запросов, длительность, процессные метрики и статус цели. Helm-поды получают scrape-аннотации `prometheus.io/*`.
+Все Fastify-сервисы отдают Prometheus-метрики на `/metrics`: количество запросов, длительность, процессные метрики и статус цели. Outbox, consumer retries, DLQ и event processing дополнительно экспортируются; Kafka Exporter измеряет consumer lag в количестве сообщений. Helm-поды получают scrape-аннотации `prometheus.io/*`.
 
-`sync-service` дополнительно отдаёт `sync_ws_connections_active`, `sync_ws_auth_failures_total` и `sync_events_sent_total`. Sync-токены подписаны `SYNC_TOKEN_SECRET`; local Compose использует development-значение, Kubernetes ожидает Secret `rp-gant-sync` с ключом `token`.
+`sync-service` дополнительно отдаёт `sync_ws_connections_active`, `sync_ws_auth_failures_total` и `sync_events_sent_total`. Sync-токены подписаны `SYNC_TOKEN_SECRET`; local Compose использует development-значение и отдельную `rp_gant_sync` БД для durable replay dedup. Staging chart ожидает `rp-gant-sync` Secret с `token` и `DATABASE_URL_SYNC`; реальные staging credentials в репозитории отсутствуют.
 
 Локальный мониторинг:
 

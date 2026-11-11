@@ -1,3 +1,9 @@
+{{- if and .Values.kafkaSecurity.enabled (or (not .Values.kafkaSecurity.bootstrapServers) (not .Values.kafkaSecurity.topic)) }}
+{{- fail "kafkaSecurity.enabled requires bootstrapServers and topic" }}
+{{- end }}
+{{- if and .Values.kafkaSecurity.enabled (not (has .Values.kafkaSecurity.saslMechanism (list "plain" "scram-sha-256" "scram-sha-512"))) }}
+{{- fail "kafkaSecurity.saslMechanism must be a supported KafkaJS mechanism" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,9 +49,39 @@ spec:
               containerPort: {{ .Values.grpc.port }}
               protocol: TCP
             {{- end }}
-          {{- with .Values.env }}
+          {{- if or .Values.env .Values.kafkaSecurity.enabled }}
           env:
+            {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.kafkaSecurity.bootstrapServers | quote }}
+            - name: KAFKA_TOPIC
+              value: {{ .Values.kafkaSecurity.topic | quote }}
+            {{- if .Values.kafkaSecurity.enabled }}
+            - name: KAFKA_SSL
+              value: "true"
+            - name: KAFKA_SASL_MECHANISM
+              value: {{ .Values.kafkaSecurity.saslMechanism | quote }}
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafkaSecurity.secretName | quote }}
+                  key: {{ .Values.kafkaSecurity.usernameKey | quote }}
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafkaSecurity.secretName | quote }}
+                  key: {{ .Values.kafkaSecurity.passwordKey | quote }}
+            {{- with .Values.kafkaSecurity.caKey }}
+            - name: KAFKA_SSL_CA
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.kafkaSecurity.secretName | quote }}
+                  key: {{ . | quote }}
+                  optional: true
+            {{- end }}
+            {{- end }}
           {{- end }}
           {{- with .Values.envFrom }}
           envFrom:

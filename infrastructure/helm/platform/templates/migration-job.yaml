@@ -1,4 +1,8 @@
 ﻿{{- if .Values.migrations.enabled }}
+{{- $migrationImage := printf "%s:%s" .Values.migrations.image.repository .Values.migrations.image.tag }}
+{{- if .Values.migrations.image.digest }}
+{{- $migrationImage = printf "%s@%s" .Values.migrations.image.repository .Values.migrations.image.digest }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -17,7 +21,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: db-migrate
-          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
+          image: {{ $migrationImage | quote }}
           imagePullPolicy: {{ .Values.migrations.image.pullPolicy }}
           envFrom:
             - secretRef:
@@ -31,4 +35,6 @@ spec:
               value: {{ .Values.migrations.notificationDb | quote }}
             - name: AUDIT_DB
               value: {{ .Values.migrations.auditDb | quote }}
+            - name: SYNC_DB
+              value: {{ if .Values.migrations.syncDb.enabled }}{{ .Values.migrations.syncDb.name | quote }}{{ else }}""{{ end }}
 {{- end }}

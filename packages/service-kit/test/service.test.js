@@ -82,11 +82,25 @@ describe('service-kit', () => {
 
   it('exposes Prometheus metrics', async () => {
     const app = buildApp();
+    app.metrics.outboxPending.set({ service: 'user' }, 42);
+    app.metrics.outboxRetries.set({ service: 'user' }, 3);
+    app.metrics.outboxPublishErrors.inc({ service: 'user' });
+    app.metrics.eventsProcessed.inc({ service: 'audit' });
+    app.metrics.eventsFailed.inc({ service: 'audit' });
+    app.metrics.dlqMessages.inc({ service: 'audit' });
+    app.metrics.eventProcessingLag.observe({ service: 'audit' }, 7.25);
     const response = await app.inject({ method: 'GET', url: '/metrics' });
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/plain');
     expect(response.body).toContain('http_requests_total');
+    expect(response.body).toContain('outbox_pending{service="user"} 42');
+    expect(response.body).toContain('outbox_events_retry_count_gt_3{service="user"} 3');
+    expect(response.body).toContain('outbox_publish_errors_total{service="user"} 1');
+    expect(response.body).toContain('events_processed_total{service="audit"} 1');
+    expect(response.body).toContain('events_failed_total{service="audit"} 1');
+    expect(response.body).toContain('dlq_messages_total{service="audit"} 1');
+    expect(response.body).toContain('event_processing_lag_seconds_count{service="audit"} 1');
     expect(response.body).toContain('rp_gant_process_cpu_user_seconds_total');
   });
 

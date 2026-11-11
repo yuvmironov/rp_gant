@@ -5,10 +5,32 @@ USER_DB="${USER_DB:-rp_gant_user}"
 PROJECT_DB="${PROJECT_DB:-rp_gant_project}"
 NOTIFICATION_DB="${NOTIFICATION_DB:-rp_gant_notification}"
 AUDIT_DB="${AUDIT_DB:-rp_gant_audit}"
+SYNC_DB="${SYNC_DB-rp_gant_sync}"
 DB_ROOT="${DB_ROOT:-/db}"
 PGHOST="${PGHOST:-postgres}"
 PGUSER="${PGUSER:-rp_gant}"
 export PGPASSWORD="${PGPASSWORD:-rp_gant_dev}"
+
+ensure_database() {
+  database="$1"
+  case "$database" in
+    ""|*[!a-zA-Z0-9_]*) echo "Invalid database name: $database" >&2; exit 1 ;;
+  esac
+  exists="$(psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d postgres -Atc \
+    "SELECT 1 FROM pg_database WHERE datname = '$database'")"
+  if [ "$exists" != "1" ]; then
+    echo "Creating database $database"
+    psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d postgres \
+      -c "CREATE DATABASE \"$database\"" >/dev/null
+  fi
+}
+
+for database in "$USER_DB" "$PROJECT_DB" "$NOTIFICATION_DB" "$AUDIT_DB"; do
+  ensure_database "$database"
+done
+if [ -n "$SYNC_DB" ]; then
+  ensure_database "$SYNC_DB"
+fi
 
 apply_migration() {
   database="$1"
@@ -38,3 +60,6 @@ apply_migration "$NOTIFICATION_DB" "$DB_ROOT/migrations/notification/0003_notifi
 apply_migration "$NOTIFICATION_DB" "$DB_ROOT/migrations/notification/0004_auth_email_delivery_queue.sql"
 apply_migration "$AUDIT_DB" "$DB_ROOT/migrations/audit/0004_audit.sql"
 apply_seed "$AUDIT_DB" "$DB_ROOT/seeds/audit/003_audit_actions.sql"
+if [ -n "$SYNC_DB" ]; then
+  apply_migration "$SYNC_DB" "$DB_ROOT/migrations/sync/0001_sync.sql"
+fi

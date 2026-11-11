@@ -11,7 +11,7 @@
 
 ## 1. Решение
 
-> В local Compose topic — `rp_gant.events`; приложения имеют fallback `rpgant.events`, если `KAFKA_TOPIC` не задан. Compose задаёт переменную. DLQ-топики ниже описаны как операционная цель и не создаются текущим local init автоматически.
+> Local Compose и service-kit fallback используют canonical topic `rp_gant.events`; Helm staging values также явно задают его всем Kafka-клиентам. `kafka-init` создаёт DLQ и consumer-specific replay topics. Legacy non-staging Helm values сохраняют прежний topic до отдельной приёмки.
 
 - Целевой брокер по ADR-001: **Kafka** во всех окружениях.
 - Local: Kafka KRaft (используется в Compose).
@@ -111,7 +111,7 @@ Partition key:
 
 ## 6. Retry и DLQ
 
-- Retry: 1, 2, 5, 10, 30 секунд; далее — DLQ.
+- Retry: паузы 1, 2, 5, 10 секунд перед повторными доставками; максимум 5 доставок всего (первая попытка + 4 retry), затем — DLQ.
 - Retry не блокирует partition бесконечно.
 - DLQ содержит envelope + error metadata.
 - Replay из DLQ — только вручную и идемпотентно.
@@ -152,20 +152,33 @@ Partition key:
 
 ## 9. Replay
 
-- Replay по offset/time для конкретной consumer group.
-- Перед replay — остановить consumer или использовать отдельную group.
+- DLQ record выбирается вручную по topic/partition/offset для конкретной consumer group.
+- Replay публикуется только в изолированный `.replay.<service>` topic; прямой replay в общий source topic запрещён.
+- Прямой offset/time replay требует остановить consumer group или использовать отдельную group.
 - Replay идемпотентен.
 - Audit replay не должен создавать дубли.
 - Notification replay не должен повторно отправлять письма без проверки job.
 - Replay — только через runbook и с approval.
+- Replay должен быть изолирован по consumer group: повторная публикация в исходный общий topic снова запустит все группы.
+
+Локальная реализация:
+
+- `pnpm dlq:replay -- --service audit|notification|sync --file <dlq-value.json>` выполняет dry-run и не подключается к Kafka.
+- Применение требует `--apply --confirm <точный event_id>` после отдельного approval; сообщение идёт в consumer-specific `.replay.<service>` topic.
+- Sync replay разрешён через отдельную БД `rp_gant_sync`: processed-event insert и broadcast выполняются в одной транзакции.
+- Файл DLQ value содержит исходный envelope; обращайтесь с ним как с данными приложения и не прикладывайте к общедоступным тикетам.
 
 ---
 
 ## 10. Security
 
-- TLS/SASL для managed Kafka.
+- TLS/SASL для managed Kafka. Все publishers, consumers и DLQ replay используют общий `getKafkaConnectionOptions` из service-kit.
+- `KAFKA_SSL=true` включает проверку сертификата; доверенный CA можно передать как `KAFKA_SSL_CA` или через `KAFKA_SSL_CA_FILE`.
+- `KAFKA_SASL_MECHANISM` поддерживает `plain`, `scram-sha-256` и `scram-sha-512`; наличие SASL credentials без TLS приводит к ошибке конфигурации.
+- Helm включает Kafka security только через `kafkaSecurity.enabled`; staging создаёт отдельный Vault-backed Kubernetes Secret для каждого service principal.
 - ACL: producer пишет только свои event types; consumer читает только свой topic/group.
-- Service credentials — Vault.
+- Service credentials — Vault; значения credentials никогда не передаются в Helm values и не логируются.
+- Local defaults остаются без TLS/SASL для локального Kafka KRaft.
 - Не логировать payload с PII.
 - `actorRoles` обязательны для действий пользователя.
 - Internal topics не публикуются.
@@ -190,10 +203,14 @@ Partition key:
 - `kafka_consumer_lag`;
 - `outbox_pending`;
 - `outbox_publish_errors`;
+- `outbox_events_retry_count_gt_3` — число unpublished событий с `retry_count > 3`;
 - `events_processed_total`;
 - `events_failed_total`;
 - `dlq_size`;
-- `event_processing_duration`.
+- `event_processing_duration`;
+- `event_processing_lag_seconds` — наблюдаемый возраст event по `occurred_at` в момент завершения обработки.
+
+Локальный alert на возраст старше 5 минут срабатывает по обработанным событиям; timestamp самого старого неподтверждённого Kafka offset Exporter не предоставляет, для остановившегося consumer остаётся alert по ненулевому message-count lag.
 
 ---
 
@@ -207,6 +224,11 @@ Partition key:
 4. Replay вручную.
 5. Проверить отсутствие дублей.
 6. Записать инцидент.
+7. Для Audit/Notification/Sync экспортировать value одной DLQ-записи в защищённый временный файл; не публиковать envelope в тикетах.
+8. Запустить dry-run `pnpm dlq:replay -- --service audit|notification|sync --file <file>` и сверить event_id, consumer и source offset.
+9. После отдельного approval повторить с `--apply --confirm <event_id>`; инструмент публикует только в соответствующий replay topic.
+10. Проверить результат и alert/DLQ size, затем удалить временный файл согласно локальной политике хранения.
+11. Для Sync сверить `event_id` в `rp_gant_sync.events.processed_events`; marker записывается транзакционно с broadcast.
 
 ### Outbox backlog
 

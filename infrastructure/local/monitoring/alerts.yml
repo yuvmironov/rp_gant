@@ -22,3 +22,53 @@
           severity: warning
         annotations:
           summary: "High p95 latency for {{ $labels.job }}"
+      - alert: OutboxBacklog
+        expr: outbox_pending > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox backlog is high for {{ $labels.service }}"
+      - alert: OutboxRetriesExceeded
+        expr: outbox_events_retry_count_gt_3 > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox events have exceeded three retries for {{ $labels.service }}"
+      - alert: OutboxPublishErrors
+        expr: increase(outbox_publish_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox publishing is failing for {{ $labels.service }}"
+      - alert: KafkaConsumerLag
+        expr: sum(clamp_min(kafka_consumergroup_lag, 0)) by (consumergroup, topic) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Persistent Kafka backlog for {{ $labels.consumergroup }} on {{ $labels.topic }}"
+      - alert: ConsumerEventAgeOverFiveMinutes
+        expr: sum by (service) (increase(event_processing_lag_seconds_count[5m])) - sum by (service) (increase(event_processing_lag_seconds_bucket{le="300"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer {{ $labels.service }} processed events older than five minutes"
+      - record: dlq_size
+        expr: sum by (topic) (clamp_min(kafka_topic_partition_current_offset{topic=~".*dlq.*"} - on (topic, partition) kafka_topic_partition_oldest_offset{topic=~".*dlq.*"}, 0))
+      - alert: KafkaDeadLetterMessages
+        expr: dlq_size > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-letter messages are waiting in {{ $labels.topic }}"
+      - alert: KafkaUnderReplicatedPartitions
+        expr: sum(kafka_topic_partition_under_replicated_partition) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka has under-replicated partitions"

@@ -200,6 +200,7 @@ curl -k https://api.rp-gant.localhost/health
 | `DATABASE_URL_PROJECT` | Project / Diagram DB |
 | `DATABASE_URL_NOTIFICATION` | Notification DB |
 | `DATABASE_URL_AUDIT` | Audit DB |
+| `DATABASE_URL_SYNC` | Sync processed-event ledger (`rp_gant_sync`) |
 | `REDIS_URL` | Redis (контейнер есть, приложение сейчас не использует) |
 | `KAFKA_BROKERS` | `kafka:9092` |
 | `KAFKA_TOPIC` | `rp_gant.events` |
@@ -248,7 +249,7 @@ curl -k https://api.rp-gant.localhost/health
 ### 7.3. PostgreSQL
 
 - один контейнер;
-- базы: `rp_gant_user`, `rp_gant_project`, `rp_gant_notification`, `rp_gant_audit`;
+- базы: `rp_gant_user`, `rp_gant_project`, `rp_gant_notification`, `rp_gant_audit`, `rp_gant_sync`;
 - init-скрипт создает базы;
 - volume `postgres_data`;
 - Local Compose фиксирует `postgres:17-alpine`; production/CI-образы задаются отдельно.
@@ -411,7 +412,8 @@ curl -k https://app.rp-gant.localhost
   - `sync`.
 - Kafka UI: `https://kafka.rp-gant.localhost`;
 - проверить outbox → topic → consumers;
-- DLQ/error topic — опционально.
+- consumers используют bounded retry, DLQ и метрики; Audit, Notification и Sync поддерживают dry-run и approval-gated replay в отдельные service topics;
+- replay выполнять только по runbook `docs/requirements/system/P0/20_Messaging_Operations.md`, не публиковать события вручную в production topic.
 
 ---
 
@@ -496,7 +498,7 @@ pnpm dev:reset
 
 1. Docker Compose поднимает инфраструктуру и все приложения.
 2. HTTPS работает на `*.rp-gant.localhost`.
-3. PostgreSQL содержит 4 БД.
+3. PostgreSQL содержит 5 БД, включая ledger `rp_gant_sync` для durable deduplication replay-событий.
 4. Kafka topic создан.
 5. Redis доступен.
 6. Mailpit принимает письма.

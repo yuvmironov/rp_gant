@@ -11,6 +11,7 @@
     "@rp-gant/service-kit": "workspace:*",
     "@rp-gant/shared": "workspace:*",
     "kafkajs": "2.2.4",
+    "pg": "^8.23.1",
     "prom-client": "15.1.3",
     "ws": "^8.18.0"
   }
