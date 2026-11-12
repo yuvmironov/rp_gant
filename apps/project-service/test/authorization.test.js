@@ -43,6 +43,108 @@ function userClient({ accessible, permission = { allowed: false } }) {
 }
 
 describe('Project Service authorization', () => {
+  it('rejects responsible assignments on tasks before accessing the database', async () => {
+    const service = createProjectImplementation({
+      db: {
+        async query() {
+          throw new Error('should_not_query');
+        },
+      },
+      userClient: userClient({
+        accessible: { is_admin: false, items: [] },
+        permission: { allowed: true },
+      }),
+    });
+
+    const { error } = await invoke(service.SetTaskAssignments, {
+      task_id: '11111111-1111-4111-8111-111111111111',
+      assignments: [
+        {
+          role: 'ASSIGNMENT_ROLE_RESPONSIBLE',
+          assignee_type: 'ASSIGNEE_TYPE_USER',
+          assignee_id: '22222222-2222-4222-8222-222222222222',
+        },
+      ],
+    });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('task_assignment_role_invalid');
+  });
+
+  it('rejects catalog executors as direction responsible before accessing the database', async () => {
+    const service = createProjectImplementation({
+      db: {
+        async query() {
+          throw new Error('should_not_query');
+        },
+      },
+      userClient: userClient({
+        accessible: { is_admin: false, items: [] },
+        permission: { allowed: true },
+      }),
+    });
+
+    const { error } = await invoke(service.SetDirectionResponsible, {
+      direction_id: '11111111-1111-4111-8111-111111111111',
+      assignment: {
+        role: 'ASSIGNMENT_ROLE_RESPONSIBLE',
+        assignee_type: 'ASSIGNEE_TYPE_EXECUTOR',
+        assignee_id: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('direction_responsible_user_required');
+  });
+
+  it('requires an active project member as the direction responsible', async () => {
+    const directionId = '11111111-1111-4111-8111-111111111111';
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    const userId = '33333333-3333-4333-8333-333333333333';
+    let connected = false;
+    const db = {
+      async query(sql) {
+        if (sql.includes('SELECT * FROM plan.directions')) {
+          return {
+            rowCount: 1,
+            rows: [{ id: directionId, diagram_id: '44444444-4444-4444-8444-444444444444' }],
+          };
+        }
+        if (sql.includes('SELECT project_id FROM project.diagrams')) {
+          return { rowCount: 1, rows: [{ project_id: projectId }] };
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      },
+      async connect() {
+        connected = true;
+        throw new Error('should_not_connect');
+      },
+    };
+    const client = userClient({
+      accessible: { is_admin: false, items: [] },
+      permission: { allowed: true, role: 'PROJECT_ROLE_EDITOR' },
+    });
+    client.GetActiveProjectMemberIds = (_request, callback) => callback(null, { user_ids: [] });
+    const service = createProjectImplementation({ db, userClient: client });
+
+    const { error } = await invoke(
+      service.SetDirectionResponsible,
+      {
+        direction_id: directionId,
+        assignment: {
+          role: 'ASSIGNMENT_ROLE_RESPONSIBLE',
+          assignee_type: 'ASSIGNEE_TYPE_USER',
+          assignee_id: userId,
+        },
+      },
+      '55555555-5555-4555-8555-555555555555',
+    );
+
+    expect(error.code).toBe(7);
+    expect(error.message).toBe('assignee_not_active_project_member');
+    expect(connected).toBe(false);
+  });
+
   it('lists all projects for app_admin even when User Service returns no memberships', async () => {
     const queries = [];
     const rows = [projectRow('project-1'), projectRow('project-2', 'owner-2')];
@@ -107,6 +209,59 @@ describe('Project Service authorization', () => {
     expect(error).toBeNull();
     expect(response.items.map((project) => project.id)).toEqual([projectId]);
     expect(listQuery.params).toEqual([false, [projectId], 50, 0, 'active']);
+  });
+
+  it('rejects new task assignments from the executor catalog', async () => {
+    const taskId = '11111111-1111-4111-8111-111111111111';
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    let connected = false;
+    const db = {
+      async query(sql) {
+        if (sql.includes('SELECT * FROM plan.tasks')) {
+          return {
+            rowCount: 1,
+            rows: [{ id: taskId, diagram_id: '44444444-4444-4444-8444-444444444444' }],
+          };
+        }
+        if (sql.includes('SELECT project_id FROM project.diagrams')) {
+          return { rowCount: 1, rows: [{ project_id: projectId }] };
+        }
+        if (sql.includes('SELECT role, assignee_type, assignee_id')) {
+          return { rowCount: 0, rows: [] };
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      },
+      async connect() {
+        connected = true;
+        throw new Error('should_not_connect');
+      },
+    };
+    const service = createProjectImplementation({
+      db,
+      userClient: userClient({
+        accessible: { is_admin: false, items: [] },
+        permission: { allowed: true, role: 'PROJECT_ROLE_EDITOR' },
+      }),
+    });
+
+    const { error } = await invoke(
+      service.SetTaskAssignments,
+      {
+        task_id: taskId,
+        assignments: [
+          {
+            role: 'ASSIGNMENT_ROLE_EXECUTOR',
+            assignee_type: 'ASSIGNEE_TYPE_EXECUTOR',
+            assignee_id: '33333333-3333-4333-8333-333333333333',
+          },
+        ],
+      },
+      '44444444-4444-4444-8444-444444444444',
+    );
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('executor_assignment_not_supported');
+    expect(connected).toBe(false);
   });
 
   it('rejects new executor assignments for users outside the active project membership', async () => {

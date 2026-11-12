@@ -589,9 +589,9 @@ describe('api-gateway project routes', () => {
         {
           id: 'assignment-1',
           role: 'ASSIGNMENT_ROLE_EXECUTOR',
-          assignee_type: 'ASSIGNEE_TYPE_EXECUTOR',
-          assignee_id: 'executor-1',
-          display_name: 'Executor One',
+          assignee_type: 'ASSIGNEE_TYPE_USER',
+          assignee_id: 'user-1',
+          display_name: 'User One',
           linked_user_id: 'user-1',
           resolved: true,
         },
@@ -612,7 +612,7 @@ describe('api-gateway project routes', () => {
       cookies: { '__Host-session': 'token', '__Host-csrf': 'csrf' },
       headers: { 'x-csrf-token': 'csrf' },
       payload: {
-        assignments: [{ role: 'executor', assigneeType: 'executor', assigneeId: 'executor-1' }],
+        assignments: [{ role: 'executor', assigneeType: 'user', assigneeId: 'user-1' }],
       },
     });
 
@@ -620,16 +620,16 @@ describe('api-gateway project routes', () => {
     expect(received.assignments).toEqual([
       {
         role: 'ASSIGNMENT_ROLE_EXECUTOR',
-        assignee_type: 'ASSIGNEE_TYPE_EXECUTOR',
-        assignee_id: 'executor-1',
+        assignee_type: 'ASSIGNEE_TYPE_USER',
+        assignee_id: 'user-1',
       },
     ]);
     expect(response.json()).toMatchObject({
       assignments: [
         {
           role: 'executor',
-          assigneeType: 'executor',
-          displayName: 'Executor One',
+          assigneeType: 'user',
+          displayName: 'User One',
           resolved: true,
         },
       ],

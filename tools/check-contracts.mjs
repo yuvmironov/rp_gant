@@ -80,7 +80,61 @@ check(
   staleMapping.length === 0,
   `REST/gRPC mapping has unknown operations: ${staleMapping.join(', ')}`,
 );
-check(Object.keys(openapi.components?.schemas ?? {}).length === 72, 'OpenAPI schemas: expected 72');
+check(Object.keys(openapi.components?.schemas ?? {}).length === 74, 'OpenAPI schemas: expected 74');
+const taskAssignmentInput =
+  openapi.paths?.['/tasks/{taskId}/assignments']?.put?.requestBody?.content?.['application/json']
+    ?.schema?.properties?.assignments;
+check(taskAssignmentInput?.maxItems === 3, 'Task assignments must allow at most three entries');
+check(
+  taskAssignmentInput?.items?.$ref === '#/components/schemas/TaskAssignmentInput',
+  'Task assignments must use their task-specific input schema',
+);
+check(
+  openapi.components?.schemas?.TaskAssignmentInput?.properties?.role?.enum?.join(',') ===
+    'executor,co_executor' &&
+    openapi.components?.schemas?.TaskAssignmentInput?.properties?.assigneeType?.enum?.join(',') ===
+      'user',
+  'Task assignments must only support executor/co_executor roles assigned to users',
+);
+check(
+  openapi.paths?.['/directions/{directionId}/responsible']?.put?.requestBody?.content?.[
+    'application/json'
+  ]?.schema?.properties?.assignment?.$ref === '#/components/schemas/DirectionResponsibleInput' &&
+    openapi.components?.schemas?.DirectionResponsibleInput?.properties?.assigneeType?.enum?.join(
+      ',',
+    ) === 'user',
+  'Direction responsible input must only support user assignees',
+);
+check(
+  openapi.components?.schemas?.Direction?.properties?.assignments?.maxItems === 1 &&
+    openapi.components?.schemas?.Direction?.properties?.assignments?.items?.$ref ===
+      '#/components/schemas/Assignment' &&
+    openapi.components?.schemas?.Assignment?.properties?.role?.enum?.join(',') === 'responsible',
+  'Direction responses must only contain responsible assignments',
+);
+check(
+  openapi.components?.schemas?.Task?.properties?.assignments?.maxItems === 3 &&
+    openapi.components?.schemas?.Task?.properties?.assignments?.items?.$ref ===
+      '#/components/schemas/TaskAssignment' &&
+    openapi.components?.schemas?.TaskAssignment?.properties?.role?.enum?.join(',') ===
+      'executor,co_executor',
+  'Task responses must only contain executor/co_executor assignments',
+);
+const importExportSchema = readJson('contracts/import-export/project-export.v2.schema.json');
+check(
+  importExportSchema.$defs?.direction?.properties?.assignments?.items?.$ref ===
+    '#/$defs/directionAssignment' &&
+    importExportSchema.$defs?.directionAssignment?.properties?.role?.const === 'responsible' &&
+    importExportSchema.$defs?.directionAssignment?.properties?.assigneeType?.const === 'user',
+  'Export directions must only contain responsible user assignments',
+);
+check(
+  importExportSchema.$defs?.task?.properties?.assignments?.items?.$ref ===
+    '#/$defs/taskAssignment' &&
+    importExportSchema.$defs?.taskAssignment?.properties?.role?.enum?.join(',') ===
+      'executor,co_executor',
+  'Export tasks must only contain executor/co_executor assignments',
+);
 
 const eventTypes = readJson('events/event-types.json');
 check(eventTypes.events?.length === 68, 'Event types: expected 68');
@@ -104,6 +158,11 @@ check(
 check(
   countFiles('notifications/templates', '.txt') === 17,
   'Text notification templates: expected 17',
+);
+const dbInit = readFileSync(join(root, 'infrastructure/local/db-init.sh'), 'utf8');
+check(
+  dbInit.includes('0008_assignment_roles_by_entity.sql'),
+  'The project assignment constraint migration must be applied during DB bootstrap',
 );
 
 check(existsSync(join(root, 'openapi/openapi.yaml')), 'openapi.yaml is missing');

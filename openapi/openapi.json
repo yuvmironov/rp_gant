@@ -2124,7 +2124,7 @@
                 ],
                 "properties": {
                   "assignment": {
-                    "$ref": "#/components/schemas/AssignmentInput"
+                    "$ref": "#/components/schemas/DirectionResponsibleInput"
                   },
                   "baseRevision": {
                     "type": "integer",
@@ -2540,7 +2540,7 @@
           "Plan"
         ],
         "operationId": "setTaskAssignments",
-        "summary": "Назначить ответственного, исполнителя и соисполнителей",
+        "summary": "Назначить исполнителя и соисполнителей",
         "parameters": [
           {
             "$ref": "#/components/parameters/TaskId"
@@ -2564,9 +2564,9 @@
                 "properties": {
                   "assignments": {
                     "type": "array",
-                    "maxItems": 4,
+                    "maxItems": 3,
                     "items": {
-                      "$ref": "#/components/schemas/AssignmentInput"
+                      "$ref": "#/components/schemas/TaskAssignmentInput"
                     }
                   },
                   "baseRevision": {
@@ -5238,10 +5238,16 @@
             "format": "uuid"
           },
           "role": {
-            "$ref": "#/components/schemas/AssignmentRole"
+            "type": "string",
+            "enum": [
+              "responsible"
+            ]
           },
           "assigneeType": {
-            "$ref": "#/components/schemas/AssigneeType"
+            "type": "string",
+            "enum": [
+              "user"
+            ]
           },
           "assigneeId": {
             "type": "string",
@@ -5259,7 +5265,26 @@
           }
         }
       },
-      "AssignmentInput": {
+      "DirectionResponsibleInput": {
+        "type": "object",
+        "required": [
+          "assigneeType",
+          "assigneeId"
+        ],
+        "properties": {
+          "assigneeType": {
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          },
+          "assigneeId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TaskAssignmentInput": {
         "type": "object",
         "required": [
           "role",
@@ -5268,10 +5293,17 @@
         ],
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/AssignmentRole"
+            "type": "string",
+            "enum": [
+              "executor",
+              "co_executor"
+            ]
           },
           "assigneeType": {
-            "$ref": "#/components/schemas/AssigneeType"
+            "type": "string",
+            "enum": [
+              "user"
+            ]
           },
           "assigneeId": {
             "type": "string",
@@ -5332,7 +5364,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Assignment"
-            }
+            },
+            "maxItems": 1
           },
           "createdAt": {
             "type": "string",
@@ -5432,8 +5465,9 @@
           "assignments": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Assignment"
-            }
+              "$ref": "#/components/schemas/TaskAssignment"
+            },
+            "maxItems": 3
           },
           "commentsCount": {
             "type": "integer"
@@ -6716,6 +6750,43 @@
               "type": "string",
               "format": "uuid"
             }
+          }
+        }
+      },
+      "TaskAssignment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "executor",
+              "co_executor"
+            ]
+          },
+          "assigneeType": {
+            "type": "string",
+            "enum": [
+              "user",
+              "executor"
+            ]
+          },
+          "assigneeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "linkedUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolved": {
+            "type": "boolean"
           }
         }
       }

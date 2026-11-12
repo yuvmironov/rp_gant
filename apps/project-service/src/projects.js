@@ -580,7 +580,7 @@ function booleanValue(value) {
   );
 }
 
-function standaloneCsvToPayload(
+export function standaloneCsvToPayload(
   text,
   report,
   executorMap = new Map(),
@@ -607,6 +607,9 @@ function standaloneCsvToPayload(
   const resultKey = find(['Результат', 'result']);
   const descKey = find(['Описание', 'description']);
   const commentsKey = find(['Комментарии', 'comments']);
+  const ownerKey = find(['Ответственный направления', 'Владелец', 'ownerId', 'owner_id']);
+  const executorKey = find(['Исполнитель', 'execId', 'executor_id']);
+  const coExecutorKey = find(['Соисполнитель', 'coId', 'co_executor_id']);
   const tasks = rows.map((row) => {
     const id = row[idKey];
     const level = Number(row[levelKey]) || id.split('.').length;
@@ -635,6 +638,9 @@ function standaloneCsvToPayload(
         .map((value) => value.trim())
         .filter(Boolean)
         .map((value) => ({ text: value.replace(/^\d{2}\.\d{2}\.\d{4}:\s*/, '') })),
+      ownerId: row[ownerKey],
+      execId: row[executorKey],
+      coId: row[coExecutorKey],
     };
   });
   const payload = normalizeStandaloneImport(
@@ -646,7 +652,7 @@ function standaloneCsvToPayload(
   return payload;
 }
 
-function normalizeStandaloneImport(
+export function normalizeStandaloneImport(
   payload,
   report,
   executorMap = new Map(),
@@ -745,15 +751,21 @@ function normalizeStandaloneImport(
         jiraNumber: item.jira ?? '',
         bpFlag: Boolean(item.hasBP ?? item.bp),
         spFlag: Boolean(item.hasSP ?? item.sp),
-        assignments: assignmentsFor(
-          item,
-          [
-            ['ownerId', 'responsible'],
-            ['execId', 'executor'],
-            ['coId', 'co_executor'],
-          ],
-          'executor',
-        ),
+        assignments: (() => {
+          const ownerId = item.ownerId;
+          const executorId = item.execId || ownerId;
+          if (item.execId && ownerId && String(item.execId) !== String(ownerId)) {
+            report.issues.push(`task_responsible_conflicts_with_executor:${item.id}`);
+          }
+          return assignmentsFor(
+            { ...item, execId: executorId },
+            [
+              ['execId', 'executor'],
+              ['coId', 'co_executor'],
+            ],
+            'executor',
+          );
+        })(),
       };
     });
   const dependencies = [];
@@ -1047,18 +1059,66 @@ async function processDiagramImport(
           if (entityId) assignments.push({ entityType: 'task', entityId, assignment });
         }
       }
+      assignments.sort((left, right) => {
+        if (
+          left.entityType !== 'task' ||
+          right.entityType !== 'task' ||
+          left.entityId !== right.entityId
+        ) {
+          return 0;
+        }
+        const leftPriority = normalizeRole(left.assignment.role) === 'responsible' ? 1 : 0;
+        const rightPriority = normalizeRole(right.assignment.role) === 'responsible' ? 1 : 0;
+        return leftPriority - rightPriority;
+      });
+      const assignmentCounts = new Map();
       for (const item of assignments) {
-        const role = normalizeRole(item.assignment.role);
+        let role = normalizeRole(item.assignment.role);
         let assigneeType = normalizeType(item.assignment.assigneeType);
         let assigneeId = String(item.assignment.assigneeId ?? '');
+        if (item.entityType === 'task' && role === 'responsible') {
+          role = 'executor';
+          report.issues.push(
+            `task_responsible_mapped_to_executor:${item.assignment.assigneeId ?? ''}`,
+          );
+        }
+        const validRoles =
+          item.entityType === 'direction' ? ['responsible'] : ['executor', 'co_executor'];
         if (
-          !['responsible', 'executor', 'co_executor'].includes(role) ||
+          !validRoles.includes(role) ||
           !['user', 'executor'].includes(assigneeType) ||
           !isUuid(assigneeId)
         ) {
           continue;
         }
-        if (role !== 'responsible' && assigneeType === 'executor') {
+        if (item.entityType === 'direction' && assigneeType === 'executor') {
+          const linkedUserId = executorUserMap.get(assigneeId);
+          if (!linkedUserId || !activeProjectMemberIds.has(linkedUserId)) {
+            report.issues.push(`direction_responsible_not_active_project_member:${assigneeId}`);
+            continue;
+          }
+          assigneeType = 'user';
+          assigneeId = linkedUserId;
+        } else if (
+          item.entityType === 'task' &&
+          role !== 'executor' &&
+          assigneeType === 'executor'
+        ) {
+          const linkedUserId = executorUserMap.get(assigneeId);
+          if (linkedUserId) {
+            assigneeType = 'user';
+            assigneeId = linkedUserId;
+          } else {
+            report.issues.push(`executor_assignment_preserved_as_legacy:${assigneeId}`);
+          }
+        } else if (
+          item.entityType === 'task' &&
+          role === 'executor' &&
+          assigneeType === 'executor' &&
+          normalizeRole(item.assignment.role) === 'responsible'
+        ) {
+          report.issues.push(`task_catalog_responsible_preserved_as_legacy_executor:${assigneeId}`);
+        } else if (assigneeType === 'executor') {
           const linkedUserId = executorUserMap.get(assigneeId);
           if (linkedUserId) {
             assigneeType = 'user';
@@ -1067,22 +1127,31 @@ async function processDiagramImport(
             report.issues.push(`executor_assignment_preserved_as_legacy:${assigneeId}`);
           }
         }
-        if (
-          role !== 'responsible' &&
-          assigneeType === 'user' &&
-          !activeProjectMemberIds.has(assigneeId)
-        ) {
+        if (assigneeType === 'user' && !activeProjectMemberIds.has(assigneeId)) {
           report.issues.push(`assignee_not_active_project_member:${assigneeId}`);
           continue;
         }
-        await client.query(
+        const slot = `${item.entityType}:${item.entityId}:${role}`;
+        const count = assignmentCounts.get(slot) ?? 0;
+        const maxForRole = role === 'co_executor' ? 2 : 1;
+        if (count >= maxForRole) {
+          report.issues.push(
+            `assignment_conflict_preserved_existing:${item.entityType}:${item.entityId}:${role}`,
+          );
+          continue;
+        }
+        const inserted = await client.query(
           `INSERT INTO plan.assignments
              (entity_type, entity_id, role, assignee_type, assignee_id, created_by_user_id)
            VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT DO NOTHING`,
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
           [item.entityType, item.entityId, role, assigneeType, assigneeId, actorId],
         );
-        report.assignments_count += 1;
+        if (inserted.rowCount > 0) {
+          assignmentCounts.set(slot, count + 1);
+          report.assignments_count += 1;
+        }
       }
 
       for (const dependency of payload.dependencies ?? []) {
@@ -1962,8 +2031,8 @@ export function createProjectImplementation({ db, userClient }) {
       const role = fromAssignmentRole(item.role);
       const assigneeType = fromAssigneeType(item.assignee_type);
       const assigneeId = String(item.assignee_id ?? '');
-      if (role !== 'responsible' || !assigneeType || !isUuid(assigneeId)) {
-        callback(grpcError(status.INVALID_ARGUMENT, 'invalid_assignment'));
+      if (role !== 'responsible' || assigneeType !== 'user' || !isUuid(assigneeId)) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'direction_responsible_user_required'));
         return;
       }
       let client;
@@ -1980,6 +2049,14 @@ export function createProjectImplementation({ db, userClient }) {
           current.rows[0].diagram_id,
         ]);
         await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.edit');
+        const activeMembers = await call(userClient, 'GetActiveProjectMemberIds', {
+          project_id: diagram.rows[0].project_id,
+          user_ids: [assigneeId],
+        });
+        if (!(activeMembers.user_ids ?? []).includes(assigneeId)) {
+          callback(grpcError(status.PERMISSION_DENIED, 'assignee_not_active_project_member'));
+          return;
+        }
         client = await db.connect();
         await client.query('BEGIN');
         await client.query(
@@ -2815,7 +2892,15 @@ export function createProjectImplementation({ db, userClient }) {
           jiraNumber: task.jira_number ?? undefined,
           bpFlag: task.bp_flag,
           spFlag: task.sp_flag,
-          assignments: assignmentsByEntity.get(`task:${task.id}`) ?? [],
+          assignments: (() => {
+            const existing = assignmentsByEntity.get(`task:${task.id}`) ?? [];
+            const assignments = existing.filter((item) => item.role !== 'responsible');
+            const legacyResponsible = existing.find((item) => item.role === 'responsible');
+            if (legacyResponsible && !assignments.some((item) => item.role === 'executor')) {
+              assignments.push({ ...legacyResponsible, role: 'executor' });
+            }
+            return assignments;
+          })(),
         }));
         const dependencyItems = dependencies.rows.map((dependency) => ({
           id: dependency.id,
@@ -3393,7 +3478,7 @@ export function createProjectImplementation({ db, userClient }) {
     async SetTaskAssignments(call_, callback) {
       const taskId = String(call_.request.task_id ?? '');
       const assignments = [];
-      const roles = { responsible: 0, executor: 0, co_executor: 0 };
+      const roles = { executor: 0, co_executor: 0 };
       const assignees = new Set();
       for (const item of call_.request.assignments ?? []) {
         const role = fromAssignmentRole(item.role);
@@ -3401,6 +3486,10 @@ export function createProjectImplementation({ db, userClient }) {
         const assigneeId = String(item.assignee_id ?? '');
         if (!role || !assigneeType || !isUuid(assigneeId)) {
           callback(grpcError(status.INVALID_ARGUMENT, 'invalid_assignment'));
+          return;
+        }
+        if (!['executor', 'co_executor'].includes(role)) {
+          callback(grpcError(status.INVALID_ARGUMENT, 'task_assignment_role_invalid'));
           return;
         }
         roles[role] += 1;
@@ -3412,12 +3501,7 @@ export function createProjectImplementation({ db, userClient }) {
         assignees.add(key);
         assignments.push({ role, assigneeType, assigneeId });
       }
-      if (
-        assignments.length > 4 ||
-        roles.responsible > 1 ||
-        roles.executor > 1 ||
-        roles.co_executor > 2
-      ) {
+      if (assignments.length > 3 || roles.executor > 1 || roles.co_executor > 2) {
         callback(grpcError(status.INVALID_ARGUMENT, 'assignment_limit_exceeded'));
         return;
       }
@@ -3454,7 +3538,6 @@ export function createProjectImplementation({ db, userClient }) {
         );
         const newLegacyAssignments = assignments.filter(
           (item) =>
-            item.role !== 'responsible' &&
             item.assigneeType === 'executor' &&
             !currentKeys.has(`${item.role}:executor:${item.assigneeId}`),
         );
@@ -3463,12 +3546,7 @@ export function createProjectImplementation({ db, userClient }) {
           return;
         }
         const newProjectUserIds = assignments
-          .filter(
-            (item) =>
-              item.role !== 'responsible' &&
-              item.assigneeType === 'user' &&
-              !currentKeys.has(`${item.role}:user:${item.assigneeId}`),
-          )
+          .filter((item) => item.assigneeType === 'user')
           .map((item) => item.assigneeId);
         if (newProjectUserIds.length) {
           const activeMembers = await call(userClient, 'GetActiveProjectMemberIds', {

@@ -376,11 +376,14 @@ function standaloneExport(snapshotData, format) {
     });
     commentsByEntity.set(comment.entityId, list);
   }
-  const assignmentsOf = (entity) => {
+  const assignmentsOf = (entity, includeResponsible = false) => {
     const list = entity.assignments ?? [];
     const find = (role) => list.find((item) => item.role === role)?.assigneeId ?? null;
-    return { ownerId: find('responsible'), execId: find('executor'), coId: find('co_executor') };
+    return includeResponsible
+      ? { ownerId: find('responsible') }
+      : { execId: find('executor') ?? find('responsible'), coId: find('co_executor') };
   };
+
   const statusRu = {
     planned: 'Запланировано',
     in_progress: 'В работе',
@@ -398,7 +401,7 @@ function standaloneExport(snapshotData, format) {
       task: direction.name,
       result: direction.result,
       description: direction.description,
-      ...assignmentsOf(direction),
+      ...assignmentsOf(direction, true),
       start: direction.startDate?.slice(0, 10) ?? null,
       end: direction.effectiveEndDate ?? direction.endDate?.slice(0, 10) ?? null,
       days: direction.days ?? 0,
@@ -442,7 +445,7 @@ function standaloneExport(snapshotData, format) {
       'Родитель',
       'Уровень',
       'Тип',
-      'Владелец',
+      'Ответственный направления',
       'Исполнитель',
       'Соисполнитель',
       'Начало',

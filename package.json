@@ -25,6 +25,7 @@
     "local:restore": "node tools/local.mjs restore",
     "local:verify-restore": "node tools/restore-drill.mjs",
     "dlq:replay": "node apps/audit-service/src/replay-dlq.js",
+    "backfill:task-assignments": "node tools/backfill-executor-assignments.mjs",
     "start:api-gateway": "node apps/api-gateway/src/index.js",
     "start:user-service": "node apps/user-service/src/index.js",
     "start:project-service": "node apps/project-service/src/index.js",

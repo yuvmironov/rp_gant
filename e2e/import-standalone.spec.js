@@ -124,6 +124,8 @@ test('imports standalone HTML JSON format', async ({ page }) => {
   expect(result.snapshot.dependencies).toHaveLength(1);
   expect(result.snapshot.schedule.criticalTaskIds.length).toBeGreaterThan(0);
   expect(result.exported.tasks).toHaveLength(3);
+  expect(result.exported.tasks.find((task) => task.level === 2)).not.toHaveProperty('ownerId');
+  expect(result.exported.tasks.find((task) => task.level === 1)).toHaveProperty('ownerId');
   expect(result.exported.directionOrder).toEqual(['1']);
   expect(Object.keys(result.exported.depStyles).length).toBe(1);
 });

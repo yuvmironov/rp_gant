@@ -67,7 +67,18 @@ export async function startNotificationConsumer(db, userClient, env = process.en
                 for (const assignment of event.payload?.assignments ?? []) {
                   const assigneeType = assignment.assigneeType ?? assignment.assignee_type;
                   const assigneeId = assignment.assigneeId ?? assignment.assignee_id;
-                  if (!['user', 'ASSIGNEE_TYPE_USER'].includes(assigneeType)) continue;
+                  const role = assignment.role;
+                  if (
+                    !['user', 'ASSIGNEE_TYPE_USER'].includes(assigneeType) ||
+                    ![
+                      'executor',
+                      'co_executor',
+                      'ASSIGNMENT_ROLE_EXECUTOR',
+                      'ASSIGNMENT_ROLE_CO_EXECUTOR',
+                    ].includes(role)
+                  ) {
+                    continue;
+                  }
                   await tx.query(
                     `INSERT INTO notify.notifications
                      (recipient_user_id, project_id, diagram_id, event_type, title, body,

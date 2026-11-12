@@ -54,7 +54,7 @@ const unreadCount = ref(0);
 const filterQuery = ref('');
 const filterStatus = ref('');
 const assignmentDraft = ref([]);
-const assignmentForm = reactive({ role: 'responsible', assigneeType: 'user', assigneeId: '' });
+const assignmentForm = reactive({ role: 'executor', assigneeId: '' });
 const projectForm = reactive({ name: '', description: '' });
 const showProjectForm = ref(false);
 const diagramForm = reactive({ name: '', description: '', dayMode: 'working' });
@@ -97,19 +97,7 @@ function syncFromTopScroll(event) {
   }
 }
 
-const modalPeople = computed(() => [
-  ...members.value.map((member) => ({
-    value: `user:${member.userId}`,
-    label: member.user?.displayName || member.user?.email || member.userId,
-  })),
-  ...executors.value.map((executor) => ({
-    value: `executor:${executor.id}`,
-    label: executor.fullName || executor.displayName || executor.id,
-  })),
-]);
-
 function modalPeopleFor(role) {
-  if (role === 'responsible') return modalPeople.value;
   const people = members.value.map((member) => ({
     value: `user:${member.userId}`,
     label: member.user?.displayName || member.user?.email || member.userId,
@@ -140,7 +128,6 @@ const newTask = reactive({
   startDate: '',
   endDate: '',
   actualEndDate: '',
-  responsibleId: '',
   executorId: '',
   coExecutorId: '',
   predecessorId: '',
@@ -193,7 +180,7 @@ watchEffect((onCleanup) => {
 });
 const linkMode = ref(false);
 const linkFrom = ref(null);
-const selectedOwner = ref('');
+const selectedExecutor = ref('');
 const dragTaskId = ref('');
 const dragOverId = ref('');
 const dragOverMode = ref('');
@@ -339,7 +326,6 @@ function openTaskModal(prefill = {}) {
     endDate: '',
     actualEndDate: '',
     estimatedHours: null,
-    responsibleId: '',
     executorId: '',
     coExecutorId: '',
     predecessorId: '',
@@ -370,7 +356,6 @@ async function openTaskEditor(task) {
     endDate: task.endDate ? task.endDate.slice(0, 10) : '',
     actualEndDate: task.actualEndDate ? task.actualEndDate.slice(0, 10) : '',
     estimatedHours: task.estimatedHours ?? null,
-    responsibleId: '',
     executorId: '',
     coExecutorId: '',
     predecessorId: '',
@@ -379,7 +364,6 @@ async function openTaskEditor(task) {
   });
   showTaskModal.value = true;
   await selectTask(task);
-  newTask.responsibleId = assignmentValue('responsible');
   newTask.executorId = assignmentValue('executor');
   newTask.coExecutorId = assignmentValue('co_executor');
 }
@@ -401,7 +385,6 @@ function parseModalPerson(value) {
 
 function modalAssignments() {
   const assignments = [
-    ['responsible', newTask.responsibleId],
     ['executor', newTask.executorId],
     ['co_executor', newTask.coExecutorId],
   ]
@@ -429,7 +412,11 @@ function modalAssignments() {
       }
       continue;
     }
-    if (existing.assigneeType === 'executor' && !assignments.some((item) => item.role === existing.role)) {
+    if (
+      existing.role === 'executor' &&
+      existing.assigneeType === 'executor' &&
+      !assignments.some((item) => item.role === existing.role)
+    ) {
       assignments.push({
         role: existing.role,
         assigneeType: existing.assigneeType,
@@ -619,14 +606,15 @@ async function loadSnapshot(preserveTask = false) {
 }
 
 function fillAssignments(task) {
-  assignmentDraft.value = (task.assignments ?? []).map((item) => ({
-    role: item.role,
-    assigneeType: item.assigneeType,
-    assigneeId: item.assigneeId,
-    displayName: item.displayName,
-  }));
-  assignmentForm.role = 'responsible';
-  assignmentForm.assigneeType = 'user';
+  assignmentDraft.value = (task.assignments ?? [])
+    .filter((item) => ['executor', 'co_executor'].includes(item.role))
+    .map((item) => ({
+      role: item.role,
+      assigneeType: item.assigneeType,
+      assigneeId: item.assigneeId,
+      displayName: item.displayName,
+    }));
+  assignmentForm.role = 'executor';
   assignmentForm.assigneeId = '';
 }
 
@@ -645,11 +633,8 @@ function assignmentOptions(type) {
 
 watch(
   () => assignmentForm.role,
-  (role) => {
-    if (role !== 'responsible') {
-      assignmentForm.assigneeType = 'user';
-      assignmentForm.assigneeId = '';
-    }
+  () => {
+    assignmentForm.assigneeId = '';
   },
 );
 
@@ -663,7 +648,7 @@ function assignmentName(assignment) {
 
 function addAssignment() {
   if (!assignmentForm.assigneeId) return;
-  const assigneeType = assignmentForm.role === 'responsible' ? assignmentForm.assigneeType : 'user';
+  const assigneeType = 'user';
   const duplicate = assignmentDraft.value.some(
     (item) =>
       item.role === assignmentForm.role &&
@@ -1204,7 +1189,7 @@ const projectName = computed(
 
 const ganttRows = computed(() => {
   const query = filterQuery.value.trim().toLowerCase();
-  const filtering = Boolean(query || filterStatus.value || selectedOwner.value);
+  const filtering = Boolean(query || filterStatus.value || selectedExecutor.value);
   const allTasks = snapshot.value?.tasks ?? [];
   const matches = (task) => {
     const matchesQuery =
@@ -1212,12 +1197,12 @@ const ganttRows = computed(() => {
       task.name?.toLowerCase().includes(query) ||
       task.wbsCode?.toLowerCase().includes(query);
     const matchesStatus = !filterStatus.value || task.status === filterStatus.value;
-    const matchesOwner =
-      !selectedOwner.value ||
+    const matchesExecutor =
+      !selectedExecutor.value ||
       (task.assignments ?? []).some(
-        (assignment) => assignment.role === 'responsible' && assignment.assigneeId === selectedOwner.value,
+        (assignment) => assignment.role === 'executor' && assignment.assigneeId === selectedExecutor.value,
       );
-    return matchesQuery && matchesStatus && matchesOwner;
+    return matchesQuery && matchesStatus && matchesExecutor;
   };
   const matched = new Set(allTasks.filter(matches).map((task) => task.id));
   const byId = new Map(allTasks.map((task) => [task.id, task]));
@@ -1357,7 +1342,8 @@ function taskTooltip(task) {
     task.actualEndDate ? `Факт: ${formatShortDate(task.actualEndDate)}` : '',
     Number(task.estimatedHours) > 0 ? `Часы: ${task.estimatedHours} ч` : '',
     `Статус: ${statusLabel(task.status)} · ${task.progress}% · ${task.priority}`,
-    responsibleName(task) ? `Ответственный: ${responsibleName(task)}` : '',
+    assignmentByRole(task, 'executor') ? `Исполнитель: ${assignmentByRole(task, 'executor')}` : '',
+    assignmentByRole(task, 'co_executor') ? `Соисполнитель: ${assignmentByRole(task, 'co_executor')}` : '',
     task.jiraNumber ? `Jira: ${task.jiraNumber}` : '',
     task.isCritical ? 'Критический путь' : task.float != null ? `Резерв: ${task.float} дн.` : '',
     task.commentsCount ? `Комментарии: ${task.commentsCount}` : '',
@@ -1793,11 +1779,6 @@ async function exportPdf() {
 
 function formatShortDate(value) {
   return value ? new Date(value).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
-}
-
-function responsibleName(task) {
-  const assignment = (task.assignments ?? []).find((item) => item.role === 'responsible');
-  return assignment ? assignmentName(assignment) : '';
 }
 
 function statusBadgeClass(statusValue) {
@@ -2312,13 +2293,13 @@ onMounted(async () => {
           <option value="blocked">Блокировано</option>
             <option value="postponed">Отложено</option>
         </select>
-        <select v-model="selectedOwner" class="input toolbar-input">
-          <option value="">Все ответственные</option>
+        <select v-model="selectedExecutor" class="input toolbar-input">
+          <option value="">Все исполнители</option>
           <option v-for="member in members" :key="member.userId" :value="member.userId">
             {{ member.user?.displayName || member.user?.email }}
           </option>
         </select>
-        <button v-if="filterQuery || filterStatus || selectedOwner" class="gantt-chip" type="button" @click="filterQuery = ''; filterStatus = ''; selectedOwner = ''">Сбросить</button>
+        <button v-if="filterQuery || filterStatus || selectedExecutor" class="gantt-chip" type="button" @click="filterQuery = ''; filterStatus = ''; selectedExecutor = ''">Сбросить</button>
         <button class="gantt-chip" type="button" @click="openDependency()">Связи</button>
         <button class="gantt-chip" :class="{ active: linkMode }" type="button" @click="toggleLinkMode">Связать</button>
         <span v-if="linkMode" class="gantt-chip active link-hint">
@@ -2442,7 +2423,8 @@ onMounted(async () => {
                 <button v-if="row.task.commentsCount" class="row-chip" type="button" @click.stop="openTaskEditor(row.task)">💬 {{ row.task.commentsCount }}</button>
                 <button class="row-chip flag-toggle" :class="{ 'flag-on': row.task.bpFlag }" type="button" @click.stop="toggleFlag(row.task, 'bpFlag')">БП</button>
                 <button class="row-chip flag-toggle" :class="{ 'flag-on': row.task.spFlag }" type="button" @click.stop="toggleFlag(row.task, 'spFlag')">СП</button>
-                <span v-if="responsibleName(row.task)" class="badge badge-neutral">{{ responsibleName(row.task) }}</span>
+                <span v-if="assignmentByRole(row.task, 'executor')" class="badge badge-neutral">Исполнитель: {{ assignmentByRole(row.task, 'executor') }}</span>
+                <span v-if="assignmentByRole(row.task, 'co_executor')" class="badge badge-neutral">Соисп.: {{ assignmentByRole(row.task, 'co_executor') }}</span>
                 <span class="badge badge-dot" :class="statusBadgeClass(row.task.status)">{{ statusLabel(row.task.status) }}</span>
                 <span class="badge badge-neutral">{{ row.task.progress }}%</span>
                 <span v-if="Number(row.task.estimatedHours) > 0" class="badge badge-neutral">{{ row.task.estimatedHours }} ч</span>
@@ -2591,24 +2573,19 @@ onMounted(async () => {
         <div class="stack">
           <div class="manage-list">
             <div v-for="(assignment, index) in assignmentDraft" :key="`${assignment.role}-${assignment.assigneeType}-${assignment.assigneeId}`" class="manage-item">
-              <span>{{ assignment.role === 'responsible' ? 'Ответственный' : assignment.role === 'executor' ? 'Исполнитель' : 'Соисполнитель' }}: {{ assignmentName(assignment) }}</span>
+              <span>{{ assignment.role === 'executor' ? 'Исполнитель' : 'Соисполнитель' }}: {{ assignmentName(assignment) }}</span>
               <button class="btn btn-ghost btn-sm" type="button" @click="removeAssignment(index)">Удалить</button>
             </div>
             <p v-if="!assignmentDraft.length" class="muted small">Назначений нет.</p>
           </div>
           <select v-model="assignmentForm.role" class="input">
-            <option value="responsible">Ответственный</option>
             <option value="executor">Исполнитель</option>
             <option value="co_executor">Соисполнитель</option>
           </select>
-          <select v-if="assignmentForm.role === 'responsible'" v-model="assignmentForm.assigneeType" class="input">
-            <option value="user">Пользователь</option>
-            <option value="executor">Запись каталога</option>
-          </select>
-          <p v-else class="muted small">Назначить можно только активного участника этого проекта.</p>
+          <p class="muted small">Назначить можно только активного участника этого проекта.</p>
           <select v-model="assignmentForm.assigneeId" class="input">
             <option value="">Выберите</option>
-            <option v-for="option in assignmentOptions(assignmentForm.role === 'responsible' ? assignmentForm.assigneeType : 'user')" :key="option.id" :value="option.id">{{ option.displayName }}</option>
+            <option v-for="option in assignmentOptions('user')" :key="option.id" :value="option.id">{{ option.displayName }}</option>
           </select>
           <button class="btn btn-secondary" type="button" @click="addAssignment">Добавить назначение</button>
         </div>
@@ -2737,15 +2714,6 @@ onMounted(async () => {
           <label v-if="editingTaskId" class="field">
             <span>Факт завершения</span>
             <input v-model="newTask.actualEndDate" class="input" type="date" />
-          </label>
-          <label class="field">
-            <span>Ответственный</span>
-            <select v-model="newTask.responsibleId" class="input">
-              <option value="">Не назначен</option>
-              <option v-for="person in modalPeopleFor('responsible')" :key="person.value" :value="person.value">
-                {{ person.label }}
-              </option>
-            </select>
           </label>
           <label class="field">
             <span>Исполнитель</span>
@@ -3134,9 +3102,6 @@ onMounted(async () => {
       <div>
         <span class="bar-tooltip-key">Статус:</span> {{ statusLabel(barTooltip.task.status) }} · {{ barTooltip.task.progress }}%
         <span class="bar-tooltip-key">· приоритет: {{ priorityLabel(barTooltip.task.priority) }}</span>
-      </div>
-      <div v-if="assignmentByRole(barTooltip.task, 'responsible')">
-        <span class="bar-tooltip-key">Ответственный:</span> {{ assignmentByRole(barTooltip.task, 'responsible') }}
       </div>
       <div v-if="assignmentByRole(barTooltip.task, 'executor')">
         <span class="bar-tooltip-key">Исполнитель:</span> {{ assignmentByRole(barTooltip.task, 'executor') }}
