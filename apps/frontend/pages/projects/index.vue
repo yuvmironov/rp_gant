@@ -13,6 +13,10 @@ const showCreate = ref(false);
 const projectForm = reactive({ name: '', description: '' });
 const openMenuId = ref('');
 const searchInput = ref(null);
+const currentPage = ref(1);
+const projectsPerPage = 50;
+const projectApiPageSize = 200;
+const projectApiPageBatchSize = 4;
 const toast = useToast();
 
 watch(error, (value) => {
@@ -48,6 +52,50 @@ const visibleProjects = computed(() => {
   return items;
 });
 
+const pageCount = computed(() =>
+  Math.max(1, Math.ceil(visibleProjects.value.length / projectsPerPage)),
+);
+const paginatedProjects = computed(() => {
+  const start = (currentPage.value - 1) * projectsPerPage;
+  return visibleProjects.value.slice(start, start + projectsPerPage);
+});
+const paginationSummary = computed(() => {
+  const total = visibleProjects.value.length;
+  if (total === 0) return 'Показано 0 из 0';
+  const start = (currentPage.value - 1) * projectsPerPage + 1;
+  const end = Math.min(start + projectsPerPage - 1, total);
+  return `Показано ${start}–${end} из ${total}`;
+});
+const paginationItems = computed(() => {
+  const count = pageCount.value;
+  if (count <= 7) return Array.from({ length: count }, (_, index) => index + 1);
+
+  const candidates = [
+    ...new Set([1, currentPage.value - 1, currentPage.value, currentPage.value + 1, count]),
+  ]
+    .filter((page) => page >= 1 && page <= count)
+    .sort((a, b) => a - b);
+  const items = [];
+  let previous = 0;
+  for (const page of candidates) {
+    if (page - previous > 1) items.push(`ellipsis-${previous}-${page}`);
+    items.push(page);
+    previous = page;
+  }
+  return items;
+});
+
+watch([activeTab, search, roleFilter, sortMode], () => {
+  currentPage.value = 1;
+});
+watch(pageCount, (count) => {
+  if (currentPage.value > count) currentPage.value = count;
+});
+
+function goToPage(page) {
+  currentPage.value = Math.min(Math.max(page, 1), pageCount.value);
+}
+
 function csrfToken() {
   return document.cookie
     .split(';')
@@ -72,15 +120,45 @@ async function api(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
+async function loadAllProjects(status) {
+  const firstPage = await api(
+    `/projects?limit=${projectApiPageSize}&offset=0&status=${status}`,
+  );
+  const items = [...(firstPage.items ?? [])];
+  const reportedTotal = Number(firstPage.page?.total);
+  const total = Number.isFinite(reportedTotal)
+    ? Math.max(reportedTotal, items.length)
+    : items.length;
+  const reportedLimit = Number(firstPage.page?.limit);
+  const pageSize =
+    Number.isFinite(reportedLimit) && reportedLimit > 0
+      ? reportedLimit
+      : projectApiPageSize;
+  const offsets = [];
+
+  for (let offset = pageSize; offset < total; offset += pageSize) offsets.push(offset);
+  for (let index = 0; index < offsets.length; index += projectApiPageBatchSize) {
+    const pages = await Promise.all(
+      offsets
+        .slice(index, index + projectApiPageBatchSize)
+        .map((offset) =>
+          api(`/projects?limit=${pageSize}&offset=${offset}&status=${status}`),
+        ),
+    );
+    for (const page of pages) items.push(...(page.items ?? []));
+  }
+
+  return { items: items.slice(0, total), total };
+}
+
 async function loadProjects() {
   const statuses = ['active', 'archived', 'deleted'];
-  const responses = await Promise.all(
-    statuses.map((status) => api(`/projects?limit=200&status=${status}`)),
-  );
+  const responses = await Promise.all(statuses.map((status) => loadAllProjects(status)));
   statuses.forEach((status, index) => {
-    projectsByStatus[status] = responses[index].items ?? [];
-    totals[status] = responses[index].page?.total ?? projectsByStatus[status].length;
+    projectsByStatus[status] = responses[index].items;
+    totals[status] = responses[index].total;
   });
+  currentPage.value = 1;
 }
 
 async function loadUnread() {
@@ -310,7 +388,7 @@ onMounted(boot);
             <span>Действия</span>
           </div>
           <div
-            v-for="project in visibleProjects"
+            v-for="project in paginatedProjects"
             :key="project.id"
             class="project-row"
             @click="openProject(project)"
@@ -345,8 +423,38 @@ onMounted(boot);
         </div>
 
         <div class="projects-footer">
-          <span>Показано {{ visibleProjects.length }} из {{ totals[activeTab] }}</span>
-          <span class="pagination"><button type="button" disabled>‹</button><button type="button" class="active">1</button><button type="button" disabled>›</button></span>
+          <span>{{ paginationSummary }}</span>
+          <nav v-if="pageCount > 1" class="pagination" aria-label="Страницы проектов">
+            <button
+              type="button"
+              aria-label="Предыдущая страница"
+              :disabled="currentPage === 1"
+              @click="goToPage(currentPage - 1)"
+            >
+              ‹
+            </button>
+            <template v-for="item in paginationItems" :key="`page-${item}`">
+              <span v-if="typeof item !== 'number'" class="pagination-ellipsis" aria-hidden="true">…</span>
+              <button
+                v-else
+                type="button"
+                :class="{ active: currentPage === item }"
+                :aria-label="`Страница ${item}`"
+                :aria-current="currentPage === item ? 'page' : undefined"
+                @click="goToPage(item)"
+              >
+                {{ item }}
+              </button>
+            </template>
+            <button
+              type="button"
+              aria-label="Следующая страница"
+              :disabled="currentPage === pageCount"
+              @click="goToPage(currentPage + 1)"
+            >
+              ›
+            </button>
+          </nav>
         </div>
       </section>
     </main>
@@ -666,6 +774,23 @@ onMounted(boot);
   border-radius: 7px;
   background: var(--color-surface);
   color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.pagination button:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pagination-ellipsis {
+  display: grid;
+  min-width: 14px;
+  place-items: center;
 }
 
 .pagination button.active {

@@ -33,3 +33,59 @@ test('projects page creates and archives a project', async ({ page }) => {
   await page.getByRole('button', { name: /Архив/ }).click();
   await expect(page.locator('.project-row')).toContainText(projectName);
 });
+
+test('projects page loads and paginates projects beyond the API page limit', async ({ page }) => {
+  const requestedActiveOffsets = [];
+  const totalProjects = 263;
+
+  await page.route('**/api/v1/auth/session', (route) =>
+    route.fulfill({
+      json: { user: { displayName: 'Pagination Tester', globalRoles: [] } },
+    }),
+  );
+  await page.route('**/api/v1/notifications/unread-count', (route) =>
+    route.fulfill({ json: { count: 0 } }),
+  );
+  await page.route(/\/api\/v1\/projects(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    const status = url.searchParams.get('status') ?? 'active';
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    const limit = Number(url.searchParams.get('limit') ?? 200);
+    const total = status === 'active' ? totalProjects : 0;
+    if (status === 'active') requestedActiveOffsets.push(offset);
+
+    const items = Array.from(
+      { length: Math.max(0, Math.min(limit, total - offset)) },
+      (_, index) => {
+        const number = offset + index + 1;
+        return {
+          id: `project-${number}`,
+          name: `Проект ${number}`,
+          description: '',
+          status,
+          myRole: 'project_owner',
+          diagramsCount: 0,
+          owner: { displayName: 'Владелец' },
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+      },
+    );
+
+    await route.fulfill({ json: { items, page: { total, limit, offset } } });
+  });
+
+  await page.goto('/projects');
+
+  await expect(page.locator('.project-row')).toHaveCount(50);
+  await expect(page.locator('.projects-footer')).toContainText('Показано 1–50 из 263');
+  expect(requestedActiveOffsets).toContain(200);
+
+  await page.getByRole('button', { name: 'Страница 6' }).click();
+  await expect(page.locator('.projects-footer')).toContainText('Показано 251–263 из 263');
+  await expect(page.locator('.project-row')).toHaveCount(13);
+  await expect(page.locator('.project-row').last()).toContainText('Проект 263');
+
+  await page.locator('.projects-search').fill('Проект 263');
+  await expect(page.locator('.projects-footer')).toContainText('Показано 1–1 из 1');
+  await expect(page.locator('.project-row')).toHaveCount(1);
+});
