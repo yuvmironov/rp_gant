@@ -108,6 +108,20 @@ test('nuxt gantt page renders tasks and edit modal', async ({ page }) => {
   await expect(
     page.locator('.task-modal').getByText('Соисполнитель', { exact: true }),
   ).toBeVisible();
+  await expect(page.locator('.task-modal')).toContainText(
+    'Запись каталога сама по себе не даёт членство',
+  );
+  await expect(page.locator('.task-modal .assignment-members-link')).toHaveAttribute(
+    'href',
+    `/members?project=${ids.projectId}`,
+  );
+  await page.locator('.task-modal .assignment-members-link').click();
+  await expect(page).toHaveURL(`/members?project=${ids.projectId}`);
+  await expect(page.locator('.members-page')).toBeVisible();
+  await expect(page.locator('select[aria-label="Выбрать проект"]')).toHaveValue(ids.projectId);
+  await page.goto(`/gantt?project=${ids.projectId}&diagram=${ids.diagramId}`);
+  await expect(page.locator('.gantt-page')).toBeVisible();
+  await page.getByTitle('Создать задачу в направлении').first().click();
   await page.locator('.task-modal-head .btn-icon').click();
   await page.getByTitle('Редактировать направление').first().click();
   await expect(page.locator('.direction-modal')).toBeVisible();

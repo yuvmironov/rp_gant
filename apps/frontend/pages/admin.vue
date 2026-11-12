@@ -196,7 +196,7 @@ function executorProjectNames(item) {
   const names = (item.projectIds ?? [])
     .map((id) => activeProjects.value.find((project) => project.id === id)?.name)
     .filter(Boolean);
-  return names.length ? names.join(', ') : 'Нет активных проектов — недоступен в назначениях';
+  return names.length ? names.join(', ') : 'Нет активных проектов каталога';
 }
 
 async function deactivateExecutor(item) {
@@ -394,12 +394,15 @@ onMounted(boot);
               <input v-model="newExecutor.position" class="input" placeholder="Должность" />
             </div>
             <label class="executor-project-picker">
-              <span>Проекты, в которых доступен исполнитель <b>· обязательно</b></span>
+              <span>Проекты, где видна запись каталога <b>· обязательно</b></span>
               <select v-model="newExecutor.projectIds" class="input" multiple required size="4" aria-label="Проекты исполнителя">
                 <option v-for="project in activeProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
               </select>
               <small v-if="!activeProjects.length">Нет активных проектов для выбора.</small>
-              <small v-else>Можно выбрать несколько проектов. Участие не выдаёт пользователю доступ к проекту.</small>
+              <small v-else>
+                Эта привязка управляет только видимостью записи каталога; она не создаёт аккаунт и не добавляет пользователя в команду.
+                Для назначения в задаче нужна учётная запись с активным членством (раздел «Участники»).
+              </small>
             </label>
             <div class="executor-form-actions">
               <button class="btn btn-secondary" type="submit" :disabled="!activeProjects.length">
@@ -410,7 +413,7 @@ onMounted(boot);
           </form>
           <div class="table-wrap">
             <table class="table admin-table executor-table">
-              <thead><tr><th>ФИО</th><th>Должность</th><th>Доступен в проектах</th><th>Действия</th></tr></thead>
+              <thead><tr><th>ФИО</th><th>Должность</th><th>Запись каталога видна в проектах</th><th>Действия</th></tr></thead>
               <tbody>
                 <tr v-for="item in executors" :key="item.id">
                   <td class="name-cell">{{ item.fullName }}<span v-if="!item.isActive" class="executor-inactive">Неактивен</span></td>

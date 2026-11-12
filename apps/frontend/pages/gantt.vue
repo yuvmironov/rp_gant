@@ -1186,6 +1186,9 @@ async function logout() {
 const projectName = computed(
   () => projects.value.find((project) => project.id === projectId.value)?.name ?? 'Проект',
 );
+const projectMembersUrl = computed(
+  () => `/members?project=${encodeURIComponent(projectId.value)}`,
+);
 
 const ganttRows = computed(() => {
   const query = filterQuery.value.trim().toLowerCase();
@@ -2582,7 +2585,13 @@ onMounted(async () => {
             <option value="executor">Исполнитель</option>
             <option value="co_executor">Соисполнитель</option>
           </select>
-          <p class="muted small">Назначить можно только активного участника этого проекта.</p>
+          <div class="assignment-scope-note">
+            <p class="muted small">
+              Новые назначения доступны только активным участникам проекта. Запись каталога сама по себе не даёт членство.
+              Чтобы назначить этого человека, пригласите его учётную запись в проект и дождитесь принятия приглашения.
+            </p>
+            <a class="btn btn-ghost btn-sm assignment-members-link" :href="projectMembersUrl">Участники проекта</a>
+          </div>
           <select v-model="assignmentForm.assigneeId" class="input">
             <option value="">Выберите</option>
             <option v-for="option in assignmentOptions('user')" :key="option.id" :value="option.id">{{ option.displayName }}</option>
@@ -2744,6 +2753,13 @@ onMounted(async () => {
           </label>
           <label class="checkbox-line"><input v-model="newTask.bpFlag" type="checkbox" /> БП</label>
           <label class="checkbox-line"><input v-model="newTask.spFlag" type="checkbox" /> СП</label>
+        </div>
+        <div class="assignment-scope-note">
+          <p class="muted small">
+            Новые назначения доступны только активным участникам проекта. Запись каталога сама по себе не даёт членство.
+            Чтобы назначить этого человека, пригласите его учётную запись в проект и дождитесь принятия приглашения.
+          </p>
+          <a class="btn btn-ghost btn-sm assignment-members-link" :href="projectMembersUrl">Участники проекта</a>
         </div>
         <p v-if="autoTaskEnd" class="muted small">
           Окончание рассчитано автоматически: {{ formatShortDate(autoTaskEnd) }} ({{ newTask.estimatedHours }} ч,
@@ -3323,6 +3339,8 @@ onMounted(async () => {
 .task-modal-head h3 { margin: 2px 0 0; }
 .task-modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .task-modal-grid .full { grid-column: 1 / -1; }
+.assignment-scope-note { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.assignment-scope-note p { flex: 1 1 300px; margin: 0; }
 .task-modal-comments { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--color-border); display: grid; gap: 8px; }
 .comments-head { display: flex; align-items: baseline; gap: 8px; }
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
