@@ -76,13 +76,25 @@ test('projects page loads and paginates projects beyond the API page limit', asy
 
   await page.goto('/projects');
 
-  await expect(page.locator('.project-row')).toHaveCount(50);
-  await expect(page.locator('.projects-footer')).toContainText('Показано 1–50 из 263');
+  await expect(page.locator('.project-row')).toHaveCount(10);
+  await expect(page.locator('.projects-footer')).toContainText('Показано 1–10 из 263');
+  await expect(page.getByLabel('Количество проектов на странице')).toHaveValue('10');
   expect(requestedActiveOffsets).toContain(200);
 
-  await page.getByRole('button', { name: 'Страница 6' }).click();
-  await expect(page.locator('.projects-footer')).toContainText('Показано 251–263 из 263');
-  await expect(page.locator('.project-row')).toHaveCount(13);
+  await page.getByLabel('Количество проектов на странице').selectOption('20');
+  await expect(page.locator('.project-row')).toHaveCount(20);
+  await expect(page.locator('.projects-footer')).toContainText('Показано 1–20 из 263');
+  await page.getByRole('button', { name: 'Последняя страница' }).click();
+  await expect(page.locator('.projects-footer')).toContainText('Показано 261–263 из 263');
+  await expect(page.locator('.project-row')).toHaveCount(3);
+  await expect(page.locator('.project-row').last()).toContainText('Проект 263');
+
+  await page.getByLabel('Количество проектов на странице').selectOption('30');
+  await expect(page.locator('.projects-footer')).toContainText('Показано 1–30 из 263');
+  await expect(page.locator('.project-row')).toHaveCount(30);
+  await page.getByRole('button', { name: 'Последняя страница' }).click();
+  await expect(page.locator('.projects-footer')).toContainText('Показано 241–263 из 263');
+  await expect(page.locator('.project-row')).toHaveCount(23);
   await expect(page.locator('.project-row').last()).toContainText('Проект 263');
 
   await page.locator('.projects-search').fill('Проект 263');

@@ -14,7 +14,7 @@ const projectForm = reactive({ name: '', description: '' });
 const openMenuId = ref('');
 const searchInput = ref(null);
 const currentPage = ref(1);
-const projectsPerPage = 50;
+const projectsPerPage = ref(10);
 const projectApiPageSize = 200;
 const projectApiPageBatchSize = 4;
 const toast = useToast();
@@ -53,39 +53,30 @@ const visibleProjects = computed(() => {
 });
 
 const pageCount = computed(() =>
-  Math.max(1, Math.ceil(visibleProjects.value.length / projectsPerPage)),
+  Math.max(1, Math.ceil(visibleProjects.value.length / projectsPerPage.value)),
 );
 const paginatedProjects = computed(() => {
-  const start = (currentPage.value - 1) * projectsPerPage;
-  return visibleProjects.value.slice(start, start + projectsPerPage);
+  const start = (currentPage.value - 1) * projectsPerPage.value;
+  return visibleProjects.value.slice(start, start + projectsPerPage.value);
 });
 const paginationSummary = computed(() => {
   const total = visibleProjects.value.length;
   if (total === 0) return 'Показано 0 из 0';
-  const start = (currentPage.value - 1) * projectsPerPage + 1;
-  const end = Math.min(start + projectsPerPage - 1, total);
+  const start = (currentPage.value - 1) * projectsPerPage.value + 1;
+  const end = Math.min(start + projectsPerPage.value - 1, total);
   return `Показано ${start}–${end} из ${total}`;
 });
 const paginationItems = computed(() => {
   const count = pageCount.value;
-  if (count <= 7) return Array.from({ length: count }, (_, index) => index + 1);
-
-  const candidates = [
-    ...new Set([1, currentPage.value - 1, currentPage.value, currentPage.value + 1, count]),
-  ]
-    .filter((page) => page >= 1 && page <= count)
-    .sort((a, b) => a - b);
-  const items = [];
-  let previous = 0;
-  for (const page of candidates) {
-    if (page - previous > 1) items.push(`ellipsis-${previous}-${page}`);
-    items.push(page);
-    previous = page;
-  }
-  return items;
+  const visiblePages = Math.min(count, 3);
+  const firstPage = Math.min(
+    Math.max(currentPage.value - Math.floor(visiblePages / 2), 1),
+    count - visiblePages + 1,
+  );
+  return Array.from({ length: visiblePages }, (_, index) => firstPage + index);
 });
 
-watch([activeTab, search, roleFilter, sortMode], () => {
+watch([activeTab, search, roleFilter, sortMode, projectsPerPage], () => {
   currentPage.value = 1;
 });
 watch(pageCount, (count) => {
@@ -423,38 +414,70 @@ onMounted(boot);
         </div>
 
         <div class="projects-footer">
-          <span>{{ paginationSummary }}</span>
-          <nav v-if="pageCount > 1" class="pagination" aria-label="Страницы проектов">
-            <button
-              type="button"
-              aria-label="Предыдущая страница"
-              :disabled="currentPage === 1"
-              @click="goToPage(currentPage - 1)"
-            >
-              ‹
-            </button>
-            <template v-for="item in paginationItems" :key="`page-${item}`">
-              <span v-if="typeof item !== 'number'" class="pagination-ellipsis" aria-hidden="true">…</span>
-              <button
-                v-else
-                type="button"
-                :class="{ active: currentPage === item }"
-                :aria-label="`Страница ${item}`"
-                :aria-current="currentPage === item ? 'page' : undefined"
-                @click="goToPage(item)"
+          <span class="pagination-summary">{{ paginationSummary }}</span>
+          <div class="projects-footer-controls">
+            <label class="page-size-control">
+              <span>Показывать:</span>
+              <select
+                v-model.number="projectsPerPage"
+                class="page-size-select"
+                aria-label="Количество проектов на странице"
               >
-                {{ item }}
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="30">30</option>
+              </select>
+            </label>
+            <nav v-if="pageCount > 1" class="pagination" aria-label="Страницы проектов">
+              <button
+                type="button"
+                aria-label="Первая страница"
+                title="Первая страница"
+                :disabled="currentPage === 1"
+                @click="goToPage(1)"
+              >
+                «
               </button>
-            </template>
-            <button
-              type="button"
-              aria-label="Следующая страница"
-              :disabled="currentPage === pageCount"
-              @click="goToPage(currentPage + 1)"
-            >
-              ›
-            </button>
-          </nav>
+              <button
+                type="button"
+                aria-label="Предыдущая страница"
+                title="Предыдущая страница"
+                :disabled="currentPage === 1"
+                @click="goToPage(currentPage - 1)"
+              >
+                ‹
+              </button>
+              <button
+                v-for="page in paginationItems"
+                :key="page"
+                type="button"
+                :class="{ active: currentPage === page }"
+                :aria-label="`Страница ${page}`"
+                :aria-current="currentPage === page ? 'page' : undefined"
+                @click="goToPage(page)"
+              >
+                {{ page }}
+              </button>
+              <button
+                type="button"
+                aria-label="Следующая страница"
+                title="Следующая страница"
+                :disabled="currentPage === pageCount"
+                @click="goToPage(currentPage + 1)"
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                aria-label="Последняя страница"
+                title="Последняя страница"
+                :disabled="currentPage === pageCount"
+                @click="goToPage(pageCount)"
+              >
+                »
+              </button>
+            </nav>
+          </div>
         </div>
       </section>
     </main>
@@ -756,46 +779,98 @@ onMounted(boot);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
   padding: 12px 18px;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 12px;
 }
 
-.pagination {
-  display: flex;
-  gap: 5px;
+.pagination-summary {
+  white-space: nowrap;
 }
 
-.pagination button {
-  width: 28px;
-  height: 28px;
+.projects-footer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.page-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.page-size-select {
+  min-width: 68px;
+  height: 40px;
+  padding: 0 10px;
   border: 1px solid var(--color-border);
-  border-radius: 7px;
+  border-radius: 9px;
   background: var(--color-surface);
-  color: var(--color-text-muted);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
   cursor: pointer;
 }
 
+.page-size-select:focus-visible,
+.pagination button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.pagination {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 11px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+}
+
+.pagination button {
+  display: grid;
+  width: 44px;
+  height: 40px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 17px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.pagination button:last-child {
+  border-right: 0;
+}
+
 .pagination button:hover:not(:disabled) {
-  border-color: var(--color-primary);
+  background: var(--color-surface-subtle);
   color: var(--color-primary);
 }
 
 .pagination button:disabled {
-  opacity: 0.45;
+  color: var(--color-text-muted);
+  opacity: 0.42;
   cursor: not-allowed;
 }
 
-.pagination-ellipsis {
-  display: grid;
-  min-width: 14px;
-  place-items: center;
-}
-
 .pagination button.active {
-  border-color: var(--color-primary);
+  background: var(--color-surface-subtle);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
   color: var(--color-primary);
+  font-weight: 650;
 }
 
 .notification-icon {
@@ -861,11 +936,19 @@ onMounted(boot);
   .projects-head { align-items: flex-start; flex-direction: column; }
   .projects-controls { align-items: stretch; flex-direction: column; }
   .projects-controls-right { flex-wrap: wrap; }
+  .projects-footer { align-items: flex-start; flex-direction: column; }
+  .projects-footer-controls { width: 100%; justify-content: space-between; margin-left: 0; }
   .projects-table-head,
   .project-row { grid-template-columns: minmax(220px, 1fr) 0.8fr 0.8fr 40px; }
   .projects-table-head span:nth-child(3),
   .projects-table-head span:nth-child(5),
   .project-row > :nth-child(3),
   .project-row > :nth-child(5) { display: none; }
+}
+
+@media (max-width: 520px) {
+  .projects-footer-controls { align-items: flex-start; flex-direction: column; }
+  .pagination { max-width: 100%; }
+  .pagination button { width: 40px; }
 }
 </style>
