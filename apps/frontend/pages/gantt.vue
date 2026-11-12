@@ -2152,11 +2152,22 @@ onMounted(async () => {
 
 <template>
   <div class="app-shell gantt-shell">
-    <AppHeader :user="currentUser" :unread-count="unreadCount" active-page="projects" @logout="logout">
-      <template #status>
+    <header class="app-header">
+      <a class="app-brand" href="/projects"><span class="brand-mark">▥</span><span>RP Gant</span></a>
+      <nav class="app-nav">
+        <a href="/projects">Проекты</a>
+        <a href="/members">Участники</a>
+        <a href="/notifications">Уведомления</a>
+        <a href="/profile">Профиль</a>
+        <a v-if="currentUser?.globalRoles?.includes('app_admin')" href="/admin">Админка</a>
+      </nav>
+      <div class="app-header-right">
         <span class="sync-status" :class="{ online: syncConnected }">{{ syncConnected ? 'Синхронизировано' : 'Офлайн' }}</span>
-      </template>
-    </AppHeader>
+        <a class="header-icon notification-icon" href="/notifications" aria-label="Уведомления">🔔<span v-if="unreadCount" class="notice-dot">{{ unreadCount }}</span></a>
+        <div class="user-chip"><span class="avatar">{{ initials(currentUser) || 'СО' }}</span><span>{{ currentUser?.displayName || currentUser?.email || 'Пользователь' }}</span></div>
+        <button class="btn btn-ghost btn-sm" type="button" @click="logout">Выйти</button>
+      </div>
+    </header>
 
     <main class="page gantt-page">
       <div class="gantt-context">

@@ -1,7 +1,5 @@
 <script setup>
 const projects = ref([]);
-const currentUser = ref(null);
-const unreadCount = ref(0);
 const projectId = ref('');
 const members = ref([]);
 const invitations = ref([]);
@@ -37,16 +35,6 @@ async function api(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-function initials(name) {
-  return String(name || 'Пользователь')
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
-}
-
 function roleLabel(role) {
   return {
     owner: 'Владелец',
@@ -60,10 +48,8 @@ function roleLabel(role) {
 async function loadProject() {
   loading.value = true;
   try {
-    const session = await api('/auth/session');
-    currentUser.value = session?.user ?? session;
+    await api('/auth/session');
     projects.value = (await api('/projects?limit=100')).items ?? [];
-    unreadCount.value = (await api('/notifications/unread-count').catch(() => ({ count: 0 }))).count ?? 0;
     const query = new URLSearchParams(window.location.search).get('project');
     projectId.value = query || projects.value[0]?.id || '';
     await loadMembers();
@@ -134,291 +120,101 @@ async function revokeInvitation(invitation) {
   });
 }
 
-async function logout() {
-  try {
-    await api('/auth/logout', { method: 'POST', body: {} });
-  } finally {
-    window.location.href = '/login';
-  }
-}
-
 onMounted(loadProject);
 </script>
 
 <template>
-  <div class="app-shell">
-    <AppHeader :user="currentUser" :unread-count="unreadCount" active-page="members" @logout="logout" />
-    <main class="page members-page">
-      <div class="breadcrumbs">
-        <a href="/projects" class="back">Проекты</a><span class="sep">/</span><strong>Участники</strong>
+  <main class="members-page">
+    <header class="members-header">
+      <div>
+        <a href="/projects" class="back">← Проекты</a>
+        <h1>Участники проекта</h1>
       </div>
-      <header class="page-head members-header">
-        <div>
-          <p class="eyebrow">Команда проекта</p>
-          <h1 class="page-title">Участники</h1>
-          <p class="page-subtitle">Управляйте доступом и приглашениями в проект.</p>
-        </div>
-        <label class="project-picker">
-          <span>Проект</span>
-          <select v-model="projectId" class="input" aria-label="Выбрать проект" @change="loadMembers">
-            <option v-for="project in projects" :key="project.id" :value="project.id">
-              {{ project.name }}
-            </option>
-          </select>
-        </label>
-      </header>
+      <select v-model="projectId" @change="loadMembers">
+        <option v-for="project in projects" :key="project.id" :value="project.id">
+          {{ project.name }}
+        </option>
+      </select>
+    </header>
 
-      <p v-if="loading" class="loading-state">Загрузка участников...</p>
-      <div v-else-if="!projectId" class="card empty-state">Нет доступных проектов.</div>
-      <div v-else class="members-content">
-        <section class="card members-card invite-card">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Новый доступ</p>
-              <h2>Добавить участника</h2>
-              <p class="section-description">Участник получит приглашение на электронную почту.</p>
-            </div>
+    <p v-if="loading">Загрузка...</p>
+
+    <section class="card">
+      <h2>Добавить участника</h2>
+      <form class="inline" @submit.prevent="invite">
+        <input v-model="form.email" type="email" placeholder="Email" required />
+        <select v-model="form.role">
+          <option value="manager">Менеджер</option>
+          <option value="editor">Редактор</option>
+          <option value="participant">Участник</option>
+          <option value="viewer">Наблюдатель</option>
+        </select>
+        <button type="submit">Добавить или пригласить</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Состав</h2>
+      <div class="list">
+        <div v-for="member in members" :key="member.userId" class="list-item">
+          <div>
+            <strong>{{ member.user?.displayName || member.user?.email }}</strong>
+            <span>{{ member.user?.email }} · {{ roleLabel(member.role) }}</span>
           </div>
-          <form class="inline invite-form" @submit.prevent="invite">
-            <input v-model="form.email" class="input" type="email" placeholder="Email" required />
-            <select v-model="form.role" class="input">
+          <div v-if="member.role !== 'owner'" class="actions">
+            <select :value="member.role" @change="changeRole(member, $event.target.value)">
               <option value="manager">Менеджер</option>
               <option value="editor">Редактор</option>
               <option value="participant">Участник</option>
               <option value="viewer">Наблюдатель</option>
             </select>
-            <button class="btn btn-primary" type="submit">Добавить или пригласить</button>
-          </form>
-        </section>
-
-        <section class="card members-card">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="eyebrow">Доступ к проекту</p>
-              <h2>Состав команды <span class="count-badge">{{ members.length }}</span></h2>
-            </div>
+            <button type="button" @click="removeMember(member)">Удалить</button>
           </div>
-          <div v-if="members.length" class="list">
-            <div v-for="member in members" :key="member.userId" class="list-item">
-              <div class="member-identity">
-                <span class="avatar">{{ initials(member.user?.displayName || member.user?.email) }}</span>
-                <span class="member-copy">
-                  <strong>{{ member.user?.displayName || member.user?.email }}</strong>
-                  <span>{{ member.user?.email }}</span>
-                </span>
-                <span class="badge" :class="member.role === 'owner' ? 'badge-primary' : 'badge-neutral'">
-                  {{ roleLabel(member.role) }}
-                </span>
-              </div>
-              <div v-if="member.role !== 'owner'" class="actions">
-                <select class="input role-select" :value="member.role" :aria-label="`Роль участника ${member.user?.displayName || member.user?.email}`" @change="changeRole(member, $event.target.value)">
-                  <option value="manager">Менеджер</option>
-                  <option value="editor">Редактор</option>
-                  <option value="participant">Участник</option>
-                  <option value="viewer">Наблюдатель</option>
-                </select>
-                <button class="btn btn-secondary btn-sm" type="button" @click="removeMember(member)">Удалить</button>
-              </div>
-            </div>
-          </div>
-          <p v-else class="empty-state">В проекте пока нет участников.</p>
-        </section>
-
-        <section class="card members-card">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="eyebrow">Ожидают ответа</p>
-              <h2>Приглашения <span class="count-badge">{{ invitations.length }}</span></h2>
-            </div>
-          </div>
-          <div v-if="invitations.length" class="list">
-            <div v-for="invitation in invitations" :key="invitation.id" class="list-item">
-              <div class="member-identity">
-                <span class="avatar invitation-avatar" aria-hidden="true">✉</span>
-                <span class="member-copy">
-                  <strong>{{ invitation.email }}</strong>
-                  <span>{{ roleLabel(invitation.role) }}</span>
-                </span>
-                <span class="badge badge-neutral">{{ invitation.status }}</span>
-              </div>
-              <div v-if="invitation.status === 'pending'" class="actions">
-                <button class="btn btn-secondary btn-sm" type="button" @click="resendInvitation(invitation)">Отправить снова</button>
-                <button class="btn btn-ghost btn-sm" type="button" @click="revokeInvitation(invitation)">Отозвать</button>
-              </div>
-            </div>
-          </div>
-          <p v-else class="empty-state">Активных приглашений нет.</p>
-        </section>
+        </div>
       </div>
-    </main>
-  </div>
+    </section>
+
+    <section class="card">
+      <h2>Приглашения</h2>
+      <div class="list">
+        <div v-for="invitation in invitations" :key="invitation.id" class="list-item">
+          <div>
+            <strong>{{ invitation.email }}</strong>
+            <span>{{ roleLabel(invitation.role) }} · {{ invitation.status }}</span>
+          </div>
+          <div v-if="invitation.status === 'pending'" class="actions">
+            <button type="button" @click="resendInvitation(invitation)">Отправить снова</button>
+            <button type="button" @click="revokeInvitation(invitation)">Отозвать</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 </template>
 
 <style scoped>
 .members-page {
-  max-width: 1280px;
-}
-
-.members-header {
-  align-items: center;
-}
-
-.project-picker {
-  display: grid;
-  width: min(360px, 100%);
-  gap: 6px;
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 650;
-}
-
-.members-content {
-  display: grid;
-  gap: 16px;
-}
-
-.members-card {
-  padding: 20px;
-}
-
-.section-heading {
-  margin-bottom: 16px;
-}
-
-.section-heading h2 {
-  margin: 0;
-  font-size: var(--text-lg);
-}
-
-.section-description {
-  margin: 5px 0 0;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.section-heading-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.count-badge {
-  display: inline-grid;
-  min-width: 24px;
-  height: 24px;
-  margin-left: 4px;
-  padding: 0 6px;
-  place-items: center;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-muted);
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  vertical-align: 2px;
-}
-
-.invite-form {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 190px auto;
-  gap: 10px;
-}
-
-.list {
-  display: grid;
-  gap: 8px;
-}
-
-.list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-muted);
-}
-
-.member-identity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.member-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.member-copy strong,
-.member-copy > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.member-copy strong {
-  color: var(--color-text);
-  font-size: var(--text-sm);
-}
-
-.member-copy > span {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-}
-
-.invitation-avatar {
-  background: var(--color-primary-50);
-  color: var(--color-primary-700);
-  font-size: var(--text-sm);
-}
-
-.actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.role-select {
-  width: auto;
-  min-width: 132px;
-  min-height: var(--control-height-sm);
-  padding: 4px 8px;
-  font-size: var(--text-xs);
-}
-
-.empty-state,
-.loading-state {
+  max-width: 900px;
+  margin: 0 auto;
   padding: 24px;
-  color: var(--color-text-muted);
-  text-align: center;
+  color: #1f2937;
+  font-family: Inter, system-ui, sans-serif;
 }
-
-@media (max-width: 760px) {
-  .members-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .project-picker {
-    width: 100%;
-  }
-
-  .invite-form {
-    grid-template-columns: 1fr;
-  }
-
-  .list-item {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
+.members-header { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.back { color: #2563eb; text-decoration: none; font-size: 14px; }
+h1 { margin: 4px 0 0; font-size: 28px; }
+h2 { margin: 0 0 16px; font-size: 18px; }
+.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+.inline, .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+input, select, button { font: inherit; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+button { background: #111827; color: #fff; border-color: #111827; cursor: pointer; }
+.list { display: grid; gap: 8px; }
+.list-item { display: flex; justify-content: space-between; gap: 12px; padding: 10px; background: #f9fafb; border-radius: 8px; }
+.list-item div:first-child { display: grid; gap: 4px; }
+.list-item span { color: #6b7280; font-size: 12px; }
+.error { color: #b91c1c; }
+@media (max-width: 640px) {
+  .members-page { padding: 14px; }
+  .members-header, .list-item { flex-direction: column; }
 }
 </style>
