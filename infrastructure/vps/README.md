@@ -2,7 +2,7 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
-> **Статус:** production VPS обновлён 2026-11-11 до release `b75c853` после подтверждённой владельцем staging-приёмки. Rollout и базовые health/backup checks пройдены; Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
+> **Статус:** production VPS обновлён 2026-11-12 до release `6643a1a` (`PR #155`) после подтверждённой владельцем staging-приёмки. Выполнены rollout и health checks. По явному решению владельца pre-migration backup сохранён только на диске VPS и проверен восстановлением в изолированный PostgreSQL; off-host копии нет — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
 
 ## Требования
 
@@ -76,11 +76,12 @@ curl -fsS https://sync.rp-gant.ru/health/live
 
 ## Последний rollout
 
-- Release: `b75c853` (`PR #149`), 2026-11-11.
-- `db-init` создал `rp_gant_sync` и применил Sync ledger migration; все пять service DB присутствуют.
-- Healthchecked app containers, external app/Sync health и canonical/DLQ/replay Kafka topics проверены.
-- Full PostgreSQL backup до миграции (4 существовавшие DB) и backup после rollout (5 DB, включая Sync) скопированы off-host и восстановлены в изолированном PostgreSQL.
-- Владелец отметил staging acceptance как пройденную; Kubernetes staging rollout не выполнялся.
+- Release: `6643a1a` (`PR #155`), 2026-11-12; staging acceptance подтверждена владельцем.
+- `db-init` успешно применил миграции, включая user `0004_executor_projects` и project `0008_assignment_roles_by_entity`; все пять service DB присутствуют.
+- Backfill: dry-run просканировал 0 назначений; apply выполнил 0 обновлений и 0 удалений.
+- Все app containers проверены; внешние app и Sync health endpoints вернули 200, Sync `/health/live` и `/health/ready` отвечают `ok`/`ready`.
+- Pre-migration полный PostgreSQL backup: `/opt/rp-gant-backups/rp-gant-pre-assignments-9f43bcc.sql` (5 DB, 690533 bytes, mode `0600`). Изолированный restore drill прошёл на том же VPS.
+- **Исключение по решению владельца:** backup не скопирован off-host; локальный backup и restore drill не защищают от потери VPS. Kubernetes staging rollout не выполнялся.
 
 ## Начальный администратор
 
