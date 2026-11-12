@@ -109,6 +109,59 @@ describe('Project Service authorization', () => {
     expect(listQuery.params).toEqual([false, [projectId], 50, 0, 'active']);
   });
 
+  it('rejects new executor assignments for users outside the active project membership', async () => {
+    const taskId = '11111111-1111-4111-8111-111111111111';
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    const userId = '33333333-3333-4333-8333-333333333333';
+    let connected = false;
+    const db = {
+      async query(sql) {
+        if (sql.includes('SELECT * FROM plan.tasks')) {
+          return {
+            rowCount: 1,
+            rows: [{ id: taskId, diagram_id: '44444444-4444-4444-8444-444444444444' }],
+          };
+        }
+        if (sql.includes('SELECT project_id FROM project.diagrams')) {
+          return { rowCount: 1, rows: [{ project_id: projectId }] };
+        }
+        if (sql.includes('SELECT role, assignee_type, assignee_id')) {
+          return { rowCount: 0, rows: [] };
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      },
+      async connect() {
+        connected = true;
+        throw new Error('should_not_connect');
+      },
+    };
+    const client = userClient({
+      accessible: { is_admin: false, items: [] },
+      permission: { allowed: true, role: 'PROJECT_ROLE_EDITOR' },
+    });
+    client.GetActiveProjectMemberIds = (_request, callback) => callback(null, { user_ids: [] });
+    const service = createProjectImplementation({ db, userClient: client });
+
+    const { error } = await invoke(
+      service.SetTaskAssignments,
+      {
+        task_id: taskId,
+        assignments: [
+          {
+            role: 'ASSIGNMENT_ROLE_EXECUTOR',
+            assignee_type: 'ASSIGNEE_TYPE_USER',
+            assignee_id: userId,
+          },
+        ],
+      },
+      '44444444-4444-4444-8444-444444444444',
+    );
+
+    expect(error.code).toBe(7);
+    expect(error.message).toBe('assignee_not_active_project_member');
+    expect(connected).toBe(false);
+  });
+
   it('enforces project permission server-side before reading the project', async () => {
     let databaseQueries = 0;
     const db = {

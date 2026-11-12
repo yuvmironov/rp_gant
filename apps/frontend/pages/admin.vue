@@ -16,7 +16,9 @@ const auditAction = ref('');
 const auditActor = ref('');
 const newUser = ref({ email: '', lastName: '', firstName: '', appAdmin: false });
 const executors = ref([]);
-const newExecutor = ref({ lastName: '', firstName: '', middleName: '', position: '' });
+const activeProjects = ref([]);
+const editingExecutorId = ref('');
+const newExecutor = ref({ lastName: '', firstName: '', middleName: '', position: '', projectIds: [] });
 const usersPage = ref(1);
 const usersPerPage = ref(10);
 const usersTotal = ref(0);
@@ -116,6 +118,20 @@ async function loadAudit() {
   audit.value = (await api(`/audit/events?${query}`)).items ?? [];
 }
 
+async function loadActiveProjects() {
+  const items = [];
+  let offset = 0;
+  let total = Infinity;
+  while (offset < total) {
+    const response = await api(`/projects?${new URLSearchParams({ limit: '200', offset: String(offset), status: 'active' })}`);
+    items.push(...(response.items ?? []));
+    total = Number(response.page?.total ?? items.length);
+    offset += (response.items ?? []).length;
+    if (!(response.items ?? []).length) break;
+  }
+  activeProjects.value = items;
+}
+
 async function loadExecutors() {
   const query = new URLSearchParams({
     limit: String(executorsPerPage.value),
@@ -147,12 +163,40 @@ async function loadUnread() {
   unreadCount.value = (await api('/notifications/unread-count').catch(() => ({ count: 0 }))).count ?? 0;
 }
 
-async function createExecutor() {
+async function saveExecutor() {
   await run(async () => {
-    await api('/executors', { method: 'POST', body: newExecutor.value });
-    newExecutor.value = { lastName: '', firstName: '', middleName: '', position: '' };
+    const editing = Boolean(editingExecutorId.value);
+    const path = editing ? `/executors/${editingExecutorId.value}` : '/executors';
+    await api(path, {
+      method: editing ? 'PATCH' : 'POST',
+      body: newExecutor.value,
+    });
+    cancelExecutorEdit();
     await loadExecutors();
   });
+}
+
+function editExecutor(item) {
+  editingExecutorId.value = item.id;
+  newExecutor.value = {
+    lastName: item.lastName,
+    firstName: item.firstName,
+    middleName: item.middleName ?? '',
+    position: item.position ?? '',
+    projectIds: (item.projectIds ?? []).filter((id) => activeProjects.value.some((project) => project.id === id)),
+  };
+}
+
+function cancelExecutorEdit() {
+  editingExecutorId.value = '';
+  newExecutor.value = { lastName: '', firstName: '', middleName: '', position: '', projectIds: [] };
+}
+
+function executorProjectNames(item) {
+  const names = (item.projectIds ?? [])
+    .map((id) => activeProjects.value.find((project) => project.id === id)?.name)
+    .filter(Boolean);
+  return names.length ? names.join(', ') : 'Нет активных проектов — недоступен в назначениях';
 }
 
 async function deactivateExecutor(item) {
@@ -173,7 +217,7 @@ async function boot() {
       window.location.href = '/projects';
       return;
     }
-    await Promise.all([loadUsers(), loadAudit(), loadSettings(), loadExecutors(), loadUnread()]);
+    await Promise.all([loadUsers(), loadAudit(), loadSettings(), loadExecutors(), loadActiveProjects(), loadUnread()]);
   } catch (reason) {
     error.value = reason.message;
   } finally {
@@ -342,22 +386,42 @@ onMounted(boot);
               <h2>Каталог <span class="count-badge">{{ executorsTotal }}</span></h2>
             </div>
           </div>
-          <form class="inline executor-form" @submit.prevent="createExecutor">
-            <input v-model="newExecutor.lastName" class="input" placeholder="Фамилия" required />
-            <input v-model="newExecutor.firstName" class="input" placeholder="Имя" required />
-            <input v-model="newExecutor.middleName" class="input" placeholder="Отчество" />
-            <input v-model="newExecutor.position" class="input" placeholder="Должность" />
-            <button class="btn btn-secondary" type="submit">Добавить</button>
+          <form class="executor-form" @submit.prevent="saveExecutor">
+            <div class="executor-fields">
+              <input v-model="newExecutor.lastName" class="input" placeholder="Фамилия" required />
+              <input v-model="newExecutor.firstName" class="input" placeholder="Имя" required />
+              <input v-model="newExecutor.middleName" class="input" placeholder="Отчество" />
+              <input v-model="newExecutor.position" class="input" placeholder="Должность" />
+            </div>
+            <label class="executor-project-picker">
+              <span>Проекты, в которых доступен исполнитель <b>· обязательно</b></span>
+              <select v-model="newExecutor.projectIds" class="input" multiple required size="4" aria-label="Проекты исполнителя">
+                <option v-for="project in activeProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
+              </select>
+              <small v-if="!activeProjects.length">Нет активных проектов для выбора.</small>
+              <small v-else>Можно выбрать несколько проектов. Участие не выдаёт пользователю доступ к проекту.</small>
+            </label>
+            <div class="executor-form-actions">
+              <button class="btn btn-secondary" type="submit" :disabled="!activeProjects.length">
+                {{ editingExecutorId ? 'Сохранить' : 'Добавить' }}
+              </button>
+              <button v-if="editingExecutorId" class="btn btn-ghost" type="button" @click="cancelExecutorEdit">Отмена</button>
+            </div>
           </form>
           <div class="table-wrap">
             <table class="table admin-table executor-table">
-              <thead><tr><th>ФИО</th><th>Должность</th><th>Связан с пользователем</th><th>Действия</th></tr></thead>
+              <thead><tr><th>ФИО</th><th>Должность</th><th>Доступен в проектах</th><th>Действия</th></tr></thead>
               <tbody>
                 <tr v-for="item in executors" :key="item.id">
-                  <td class="name-cell">{{ item.fullName }}</td>
+                  <td class="name-cell">{{ item.fullName }}<span v-if="!item.isActive" class="executor-inactive">Неактивен</span></td>
                   <td>{{ item.position || '—' }}</td>
-                  <td><code class="linked-user-id">{{ item.linkedUserId || '—' }}</code></td>
-                  <td class="actions-cell"><div class="actions executor-actions"><button class="btn btn-ghost btn-sm" type="button" @click="deactivateExecutor(item)">Деактивировать</button></div></td>
+                  <td>{{ executorProjectNames(item) }}</td>
+                  <td class="actions-cell">
+                    <div class="actions executor-actions">
+                      <button class="btn btn-secondary btn-sm" type="button" @click="editExecutor(item)">Изменить</button>
+                      <button class="btn btn-ghost btn-sm" type="button" @click="deactivateExecutor(item)">Деактивировать</button>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -534,9 +598,46 @@ onMounted(boot);
 
 .executor-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(100px, 1fr)) auto;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 14px;
+}
+
+.executor-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.executor-project-picker {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.executor-project-picker b {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.executor-project-picker select {
+  min-height: 112px;
+}
+
+.executor-project-picker small {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.executor-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.executor-inactive {
+  display: block;
+  color: var(--color-danger);
+  font-size: var(--text-xs);
 }
 
 .executor-form .input {
@@ -555,23 +656,15 @@ onMounted(boot);
 }
 
 .executor-table th:nth-child(1) { width: 24%; }
-.executor-table th:nth-child(2) { width: 21%; }
-.executor-table th:nth-child(3) { width: 37%; }
-.executor-table th:nth-child(4) { width: 18%; }
+.executor-table th:nth-child(2) { width: 16%; }
+.executor-table th:nth-child(3) { width: 34%; }
+.executor-table th:nth-child(4) { width: 26%; }
 .executor-table .actions {
   min-width: 0;
   justify-content: flex-end;
 }
 .actions-cell { vertical-align: middle; }
 .executor-actions { justify-content: flex-end; }
-.linked-user-id {
-  display: inline-block;
-  max-width: 100%;
-  color: var(--color-text-secondary);
-  font: var(--text-xs)/1.5 var(--font-mono);
-  overflow-wrap: anywhere;
-}
-
 .audit-filters {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -711,7 +804,7 @@ onMounted(boot);
     justify-self: start;
   }
 
-  .executor-form {
+  .executor-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -742,7 +835,7 @@ onMounted(boot);
 
 @media (max-width: 560px) {
   .admin-user-form,
-  .executor-form,
+  .executor-fields,
   .audit-filters {
     grid-template-columns: 1fr;
   }

@@ -107,6 +107,26 @@ const modalPeople = computed(() => [
     label: executor.fullName || executor.displayName || executor.id,
   })),
 ]);
+
+function modalPeopleFor(role) {
+  if (role === 'responsible') return modalPeople.value;
+  const people = members.value.map((member) => ({
+    value: `user:${member.userId}`,
+    label: member.user?.displayName || member.user?.email || member.userId,
+  }));
+  const legacy = editingTaskId.value
+    ? selectedTask.value?.assignments?.find(
+        (assignment) => assignment.role === role && assignment.assigneeType === 'executor',
+      )
+    : null;
+  if (legacy) {
+    people.push({
+      value: `executor:${legacy.assigneeId}`,
+      label: `${legacy.displayName || legacy.assigneeId} — старое назначение (замените участником проекта)`,
+    });
+  }
+  return people;
+}
 const newTask = reactive({
   estimatedHours: null,
   directionId: '',
@@ -250,19 +270,38 @@ function statusLabel(value) {
   }[value] ?? value;
 }
 
+async function loadAllPages(path, parameters = {}) {
+  const items = [];
+  let offset = 0;
+  let total = Infinity;
+  while (offset < total) {
+    const query = new URLSearchParams({ ...parameters, limit: '200', offset: String(offset) });
+    const response = await api(`${path}?${query}`);
+    const pageItems = response.items ?? [];
+    items.push(...pageItems);
+    total = Number(response.page?.total ?? items.length);
+    offset += pageItems.length;
+    if (!pageItems.length) break;
+  }
+  return items;
+}
+
 async function loadProjectContext() {
   if (!projectId.value) {
     members.value = [];
+    executors.value = [];
     diagrams.value = [];
     snapshot.value = null;
     return;
   }
-  const [memberResponse, executorResponse] = await Promise.all([
-    api(`/projects/${projectId.value}/members?limit=200`).catch(() => ({ items: [] })),
-    api('/executors?limit=200').catch(() => ({ items: [] })),
+  const [memberItems, executorItems] = await Promise.all([
+    loadAllPages(`/projects/${projectId.value}/members`).catch(() => []),
+    loadAllPages('/executors', { projectId: projectId.value }).catch(() => []),
   ]);
-  members.value = memberResponse.items ?? [];
-  executors.value = executorResponse.items ?? [];
+  members.value = memberItems.filter(
+    (member) => member.status === 'active' && member.user?.status === 'active',
+  );
+  executors.value = executorItems;
 }
 
 async function selectProject() {
@@ -361,13 +400,45 @@ function parseModalPerson(value) {
 }
 
 function modalAssignments() {
-  return [
+  const assignments = [
     ['responsible', newTask.responsibleId],
     ['executor', newTask.executorId],
     ['co_executor', newTask.coExecutorId],
   ]
     .filter(([, value]) => value)
     .map(([role, value]) => ({ role, ...parseModalPerson(value) }));
+  if (!editingTaskId.value) return assignments;
+
+  const submittedKeys = new Set(
+    assignments.map((item) => `${item.role}:${item.assigneeType}:${item.assigneeId}`),
+  );
+  for (const existing of selectedTask.value?.assignments ?? []) {
+    const key = `${existing.role}:${existing.assigneeType}:${existing.assigneeId}`;
+    if (submittedKeys.has(key)) continue;
+    if (existing.role === 'co_executor') {
+      const primaryValue = assignmentValue('co_executor');
+      const primaryKey = primaryValue ? `co_executor:${primaryValue}` : '';
+      const newCoExecutor = assignments.find((item) => item.role === 'co_executor');
+      if (key !== primaryKey || !newCoExecutor) {
+        assignments.push({
+          role: existing.role,
+          assigneeType: existing.assigneeType,
+          assigneeId: existing.assigneeId,
+        });
+        submittedKeys.add(key);
+      }
+      continue;
+    }
+    if (existing.assigneeType === 'executor' && !assignments.some((item) => item.role === existing.role)) {
+      assignments.push({
+        role: existing.role,
+        assigneeType: existing.assigneeType,
+        assigneeId: existing.assigneeId,
+      });
+      submittedKeys.add(key);
+    }
+  }
+  return assignments;
 }
 
 async function saveTaskModal() {
@@ -560,9 +631,27 @@ function fillAssignments(task) {
 }
 
 function assignmentOptions(type) {
-  if (type === 'executor') return executors.value;
-  return members.value.map((member) => ({ id: member.userId, displayName: member.user?.displayName || member.user?.email }));
+  if (type === 'executor') {
+    return executors.value.map((executor) => ({
+      id: executor.id,
+      displayName: executor.fullName || executor.id,
+    }));
+  }
+  return members.value.map((member) => ({
+    id: member.userId,
+    displayName: member.user?.displayName || member.user?.email,
+  }));
 }
+
+watch(
+  () => assignmentForm.role,
+  (role) => {
+    if (role !== 'responsible') {
+      assignmentForm.assigneeType = 'user';
+      assignmentForm.assigneeId = '';
+    }
+  },
+);
 
 function assignmentName(assignment) {
   return (
@@ -574,16 +663,17 @@ function assignmentName(assignment) {
 
 function addAssignment() {
   if (!assignmentForm.assigneeId) return;
+  const assigneeType = assignmentForm.role === 'responsible' ? assignmentForm.assigneeType : 'user';
   const duplicate = assignmentDraft.value.some(
     (item) =>
       item.role === assignmentForm.role &&
-      item.assigneeType === assignmentForm.assigneeType &&
+      item.assigneeType === assigneeType &&
       item.assigneeId === assignmentForm.assigneeId,
   );
   if (duplicate) return;
   assignmentDraft.value.push({
     role: assignmentForm.role,
-    assigneeType: assignmentForm.assigneeType,
+    assigneeType,
     assigneeId: assignmentForm.assigneeId,
   });
   assignmentForm.assigneeId = '';
@@ -2511,13 +2601,14 @@ onMounted(async () => {
             <option value="executor">Исполнитель</option>
             <option value="co_executor">Соисполнитель</option>
           </select>
-          <select v-model="assignmentForm.assigneeType" class="input">
+          <select v-if="assignmentForm.role === 'responsible'" v-model="assignmentForm.assigneeType" class="input">
             <option value="user">Пользователь</option>
-            <option value="executor">Исполнитель</option>
+            <option value="executor">Запись каталога</option>
           </select>
+          <p v-else class="muted small">Назначить можно только активного участника этого проекта.</p>
           <select v-model="assignmentForm.assigneeId" class="input">
             <option value="">Выберите</option>
-            <option v-for="option in assignmentOptions(assignmentForm.assigneeType)" :key="option.id" :value="option.id">{{ option.displayName }}</option>
+            <option v-for="option in assignmentOptions(assignmentForm.role === 'responsible' ? assignmentForm.assigneeType : 'user')" :key="option.id" :value="option.id">{{ option.displayName }}</option>
           </select>
           <button class="btn btn-secondary" type="button" @click="addAssignment">Добавить назначение</button>
         </div>
@@ -2651,7 +2742,7 @@ onMounted(async () => {
             <span>Ответственный</span>
             <select v-model="newTask.responsibleId" class="input">
               <option value="">Не назначен</option>
-              <option v-for="person in modalPeople" :key="person.value" :value="person.value">
+              <option v-for="person in modalPeopleFor('responsible')" :key="person.value" :value="person.value">
                 {{ person.label }}
               </option>
             </select>
@@ -2660,7 +2751,7 @@ onMounted(async () => {
             <span>Исполнитель</span>
             <select v-model="newTask.executorId" class="input">
               <option value="">Не назначен</option>
-              <option v-for="person in modalPeople" :key="person.value" :value="person.value">
+              <option v-for="person in modalPeopleFor('executor')" :key="person.value" :value="person.value">
                 {{ person.label }}
               </option>
             </select>
@@ -2669,7 +2760,7 @@ onMounted(async () => {
             <span>Соисполнитель</span>
             <select v-model="newTask.coExecutorId" class="input">
               <option value="">Не назначен</option>
-              <option v-for="person in modalPeople" :key="person.value" :value="person.value">
+              <option v-for="person in modalPeopleFor('co_executor')" :key="person.value" :value="person.value">
                 {{ person.label }}
               </option>
             </select>

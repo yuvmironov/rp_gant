@@ -41,8 +41,6 @@ operations:
   createExecutor: { service: UserService, method: CreateExecutor }
   updateExecutor: { service: UserService, method: UpdateExecutor }
   deleteExecutor: { service: UserService, method: DeleteExecutor }
-  linkExecutorUser: { service: UserService, method: LinkExecutorUser }
-  unlinkExecutorUser: { service: UserService, method: UnlinkExecutorUser }
   listProjects: { service: ProjectService, method: ListProjects }
   createProject: { service: ProjectService, method: CreateProject }
   getProject: { service: ProjectService, method: GetProject }

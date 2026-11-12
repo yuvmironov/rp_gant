@@ -49,6 +49,7 @@ apply_seed() {
 apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0001_user_access.sql"
 apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0002_session_idle_expiration.sql"
 apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0003_auth_email_job_delivery.sql"
+apply_migration "$USER_DB" "$DB_ROOT/migrations/user_access/0004_executor_projects.sql"
 apply_seed "$USER_DB" "$DB_ROOT/seeds/user_access/001_roles_permissions.sql"
 apply_seed "$USER_DB" "$DB_ROOT/seeds/user_access/002_system_settings.sql"
 

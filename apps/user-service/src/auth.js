@@ -127,10 +127,41 @@ function toExecutor(row) {
     full_name: row.full_name,
     position: row.position ?? '',
     linked_user_id: row.linked_user_id ?? '',
+    project_ids: row.project_ids ?? [],
     is_active: row.is_active,
     created_at: toTimestamp(row.created_at),
     updated_at: toTimestamp(row.updated_at),
   };
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeExecutorProjectIds(values) {
+  if (!Array.isArray(values)) return null;
+  const projectIds = [
+    ...new Set(
+      values.map((value) =>
+        String(value ?? '')
+          .trim()
+          .toLowerCase(),
+      ),
+    ),
+  ];
+  if (!projectIds.length || projectIds.some((id) => !UUID_PATTERN.test(id))) return null;
+  return projectIds;
+}
+
+async function getExecutorWithProjects(queryable, executorId) {
+  const result = await queryable.query(
+    `SELECT e.*,
+            COALESCE(array_agg(ep.project_id ORDER BY ep.project_id) FILTER (WHERE ep.project_id IS NOT NULL), '{}') AS project_ids
+     FROM access.executors e
+     LEFT JOIN access.executor_projects ep ON ep.executor_id = e.id
+     WHERE e.id = $1
+     GROUP BY e.id`,
+    [executorId],
+  );
+  return result.rows[0];
 }
 
 function fromProjectRole(role) {
@@ -2023,6 +2054,54 @@ export function createUserImplementation({
       }
     },
 
+    async GetActiveProjectMemberIds(call, callback) {
+      const projectId = String(call.request.project_id ?? '').trim();
+      const userIds = [...new Set(call.request.user_ids ?? [])].map((id) => String(id).trim());
+      if (
+        !UUID_PATTERN.test(projectId) ||
+        userIds.length > 200 ||
+        userIds.some((id) => !UUID_PATTERN.test(id))
+      ) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'project_and_user_ids_invalid'));
+        return;
+      }
+      if (userIds.length === 0) {
+        callback(null, { user_ids: [] });
+        return;
+      }
+      try {
+        const result = await db.query(
+          `SELECT u.id
+           FROM access.users u
+           JOIN access.project_memberships pm ON pm.user_id = u.id
+           WHERE pm.project_id = $1 AND pm.status = 'active'
+             AND u.status = 'active' AND u.id = ANY($2::uuid[])
+           ORDER BY u.id`,
+          [projectId, userIds],
+        );
+        callback(null, { user_ids: result.rows.map((row) => row.id) });
+      } catch (error) {
+        callback(mapDbError(error));
+      }
+    },
+
+    async RemoveExecutorProjectLinks(call, callback) {
+      const projectId = String(call.request.project_id ?? '').trim();
+      if (!UUID_PATTERN.test(projectId)) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'project_id_invalid'));
+        return;
+      }
+      try {
+        const result = await db.query(
+          'DELETE FROM access.executor_projects WHERE project_id = $1',
+          [projectId],
+        );
+        callback(null, { deleted_count: result.rowCount ?? 0 });
+      } catch (error) {
+        callback(mapDbError(error));
+      }
+    },
+
     async GetNotificationContacts(call, callback) {
       const ids = call.request.user_ids ?? [];
       try {
@@ -2161,49 +2240,81 @@ export function createUserImplementation({
       const firstName = String(call.request.first_name ?? '').trim();
       const middleName = String(call.request.middle_name ?? '').trim();
       const position = String(call.request.position ?? '').trim();
+      const projectIds = normalizeExecutorProjectIds(call.request.project_ids);
       if (!lastName || !firstName) {
         callback(grpcError(status.INVALID_ARGUMENT, 'executor_name_required'));
+        return;
+      }
+      if (!projectIds) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'executor_projects_required'));
         return;
       }
       if (!(await canManageExecutors(db, actorUserId))) {
         callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
         return;
       }
+      let client;
       try {
+        client = await db.connect();
+        await client.query('BEGIN');
         const fullName = [lastName, firstName, middleName].filter(Boolean).join(' ');
-        const result = await db.query(
+        const result = await client.query(
           `INSERT INTO access.executors (last_name, first_name, middle_name, full_name, position)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
           [lastName, firstName, middleName || null, fullName, position || null],
         );
+        const executorId = result.rows[0].id;
+        for (const projectId of projectIds) {
+          await client.query(
+            'INSERT INTO access.executor_projects (executor_id, project_id) VALUES ($1, $2)',
+            [executorId, projectId],
+          );
+        }
+        const executor = await getExecutorWithProjects(client, executorId);
+        await client.query('COMMIT');
         await queueUserEvent(db, {
           aggregateType: 'executor',
-          aggregateId: result.rows[0].id,
+          aggregateId: executorId,
           eventType: 'executor.created',
           actorUserId,
           entityType: 'executor',
-          entityId: result.rows[0].id,
-          payload: { executorId: result.rows[0].id },
+          entityId: executorId,
+          payload: { executorId, projectIds },
         }).catch(() => {});
-        callback(null, { executor: toExecutor(result.rows[0]) });
+        callback(null, { executor: toExecutor(executor) });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
     async UpdateExecutor(call, callback) {
       const executorId = String(call.request.executor_id ?? '');
       const actorUserId = String(call.request.actor_user_id ?? '');
+      const updateProjectIds = Boolean(call.request.update_project_ids);
+      const projectIds = updateProjectIds
+        ? normalizeExecutorProjectIds(call.request.project_ids)
+        : null;
+      if (updateProjectIds && !projectIds) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'executor_projects_required'));
+        return;
+      }
       if (!(await canManageExecutors(db, actorUserId))) {
         callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
         return;
       }
+      let client;
       try {
-        const current = await db.query(
-          'SELECT * FROM access.executors WHERE id = $1 AND deleted_at IS NULL',
+        client = await db.connect();
+        await client.query('BEGIN');
+        const current = await client.query(
+          'SELECT * FROM access.executors WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
           [executorId],
         );
         if (current.rowCount === 0) {
+          await client.query('ROLLBACK');
           callback(grpcError(status.NOT_FOUND, 'executor_not_found'));
           return;
         }
@@ -2213,17 +2324,40 @@ export function createUserImplementation({
         const middleName = String(call.request.middle_name ?? row.middle_name ?? '').trim();
         const position = String(call.request.position ?? row.position ?? '').trim();
         if (!lastName || !firstName) {
+          await client.query('ROLLBACK');
           callback(grpcError(status.INVALID_ARGUMENT, 'executor_name_required'));
           return;
         }
         const fullName = [lastName, firstName, middleName].filter(Boolean).join(' ');
-        const result = await db.query(
+        await client.query(
           `UPDATE access.executors
            SET last_name = $2, first_name = $3, middle_name = $4, full_name = $5,
                position = $6, updated_at = now()
-           WHERE id = $1 RETURNING *`,
+           WHERE id = $1`,
           [executorId, lastName, firstName, middleName || null, fullName, position || null],
         );
+        if (updateProjectIds) {
+          await client.query('DELETE FROM access.executor_projects WHERE executor_id = $1', [
+            executorId,
+          ]);
+          for (const projectId of projectIds) {
+            await client.query(
+              'INSERT INTO access.executor_projects (executor_id, project_id) VALUES ($1, $2)',
+              [executorId, projectId],
+            );
+          }
+        }
+        const projectCount = await client.query(
+          'SELECT count(*)::int AS total FROM access.executor_projects WHERE executor_id = $1',
+          [executorId],
+        );
+        if (projectCount.rows[0].total === 0) {
+          await client.query('ROLLBACK');
+          callback(grpcError(status.INVALID_ARGUMENT, 'executor_projects_required'));
+          return;
+        }
+        const executor = await getExecutorWithProjects(client, executorId);
+        await client.query('COMMIT');
         await queueUserEvent(db, {
           aggregateType: 'executor',
           aggregateId: executorId,
@@ -2231,11 +2365,14 @@ export function createUserImplementation({
           actorUserId,
           entityType: 'executor',
           entityId: executorId,
-          payload: { executorId },
+          payload: { executorId, projectIds: executor.project_ids },
         }).catch(() => {});
-        callback(null, { executor: toExecutor(result.rows[0]) });
+        callback(null, { executor: toExecutor(executor) });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -2246,17 +2383,25 @@ export function createUserImplementation({
         callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
         return;
       }
+      let client;
       try {
-        const result = await db.query(
+        client = await db.connect();
+        await client.query('BEGIN');
+        const result = await client.query(
           `UPDATE access.executors
-           SET deleted_at = now(), is_active = false, linked_user_id = NULL, updated_at = now()
+           SET deleted_at = now(), is_active = false, updated_at = now()
            WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
           [executorId],
         );
         if (result.rowCount === 0) {
+          await client.query('ROLLBACK');
           callback(grpcError(status.NOT_FOUND, 'executor_not_found'));
           return;
         }
+        await client.query('DELETE FROM access.executor_projects WHERE executor_id = $1', [
+          executorId,
+        ]);
+        await client.query('COMMIT');
         await queueUserEvent(db, {
           aggregateType: 'executor',
           aggregateId: executorId,
@@ -2268,77 +2413,10 @@ export function createUserImplementation({
         }).catch(() => {});
         callback(null, { deleted: true });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
-      }
-    },
-
-    async LinkExecutorUser(call, callback) {
-      const executorId = String(call.request.executor_id ?? '');
-      const userId = String(call.request.user_id ?? '');
-      const actorUserId = String(call.request.actor_user_id ?? '');
-      if (!(await canManageExecutors(db, actorUserId))) {
-        callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
-        return;
-      }
-      try {
-        const user = await db.query('SELECT id FROM access.users WHERE id = $1', [userId]);
-        if (user.rowCount === 0) {
-          callback(grpcError(status.NOT_FOUND, 'user_not_found'));
-          return;
-        }
-        const result = await db.query(
-          `UPDATE access.executors SET linked_user_id = $2, updated_at = now()
-           WHERE id = $1 AND deleted_at IS NULL RETURNING *`,
-          [executorId, userId],
-        );
-        if (result.rowCount === 0) {
-          callback(grpcError(status.NOT_FOUND, 'executor_not_found'));
-          return;
-        }
-        await queueUserEvent(db, {
-          aggregateType: 'executor',
-          aggregateId: executorId,
-          eventType: 'executor.linked',
-          actorUserId,
-          entityType: 'executor',
-          entityId: executorId,
-          payload: { executorId, userId },
-        }).catch(() => {});
-        callback(null, { executor: toExecutor(result.rows[0]) });
-      } catch (error) {
-        callback(mapDbError(error));
-      }
-    },
-
-    async UnlinkExecutorUser(call, callback) {
-      const executorId = String(call.request.executor_id ?? '');
-      const actorUserId = String(call.request.actor_user_id ?? '');
-      if (!(await canManageExecutors(db, actorUserId))) {
-        callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
-        return;
-      }
-      try {
-        const result = await db.query(
-          `UPDATE access.executors SET linked_user_id = NULL, updated_at = now()
-           WHERE id = $1 AND deleted_at IS NULL RETURNING *`,
-          [executorId],
-        );
-        if (result.rowCount === 0) {
-          callback(grpcError(status.NOT_FOUND, 'executor_not_found'));
-          return;
-        }
-        await queueUserEvent(db, {
-          aggregateType: 'executor',
-          aggregateId: executorId,
-          eventType: 'executor.unlinked',
-          actorUserId,
-          entityType: 'executor',
-          entityId: executorId,
-          payload: { executorId },
-        }).catch(() => {});
-        callback(null, { executor: toExecutor(result.rows[0]) });
-      } catch (error) {
-        callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -2385,24 +2463,41 @@ export function createUserImplementation({
     async ListExecutors(call, callback) {
       const query = String(call.request.query ?? '').trim();
       const includeInactive = Boolean(call.request.include_inactive);
+      const projectId = String(call.request.project_id ?? '').trim();
       const limit = Math.min(Math.max(Number(call.request.page?.limit ?? 50), 1), 200);
       const offset = Math.max(Number(call.request.page?.offset ?? 0), 0);
+      if (projectId && !UUID_PATTERN.test(projectId)) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'project_id_invalid'));
+        return;
+      }
       try {
         const result = await db.query(
-          `SELECT * FROM access.executors
-           WHERE deleted_at IS NULL
-             AND ($1 = '' OR full_name ILIKE '%' || $1 || '%')
-             AND ($2 OR is_active)
-           ORDER BY full_name ASC
-           LIMIT $3 OFFSET $4`,
-          [query, includeInactive, limit, offset],
+          `SELECT e.*,
+                  COALESCE(array_agg(ep.project_id ORDER BY ep.project_id) FILTER (WHERE ep.project_id IS NOT NULL), '{}') AS project_ids
+           FROM access.executors e
+           LEFT JOIN access.executor_projects ep ON ep.executor_id = e.id
+           WHERE e.deleted_at IS NULL
+             AND ($1 = '' OR e.full_name ILIKE '%' || $1 || '%')
+             AND ($2 OR e.is_active)
+             AND ($3::uuid IS NULL OR EXISTS (
+               SELECT 1 FROM access.executor_projects filter_ep
+               WHERE filter_ep.executor_id = e.id AND filter_ep.project_id = $3::uuid
+             ))
+           GROUP BY e.id
+           ORDER BY e.full_name ASC
+           LIMIT $4 OFFSET $5`,
+          [query, includeInactive, projectId || null, limit, offset],
         );
         const count = await db.query(
-          `SELECT count(*)::int AS total FROM access.executors
-           WHERE deleted_at IS NULL
-             AND ($1 = '' OR full_name ILIKE '%' || $1 || '%')
-             AND ($2 OR is_active)`,
-          [query, includeInactive],
+          `SELECT count(*)::int AS total FROM access.executors e
+           WHERE e.deleted_at IS NULL
+             AND ($1 = '' OR e.full_name ILIKE '%' || $1 || '%')
+             AND ($2 OR e.is_active)
+             AND ($3::uuid IS NULL OR EXISTS (
+               SELECT 1 FROM access.executor_projects filter_ep
+               WHERE filter_ep.executor_id = e.id AND filter_ep.project_id = $3::uuid
+             ))`,
+          [query, includeInactive, projectId || null],
         );
         callback(null, {
           items: result.rows.map(toExecutor),
@@ -2450,9 +2545,13 @@ export function createUserImplementation({
       }
       try {
         const result = await db.query(
-          `SELECT * FROM access.executors
-           WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL
-           ORDER BY full_name ASC`,
+          `SELECT e.*,
+                  COALESCE(array_agg(ep.project_id ORDER BY ep.project_id) FILTER (WHERE ep.project_id IS NOT NULL), '{}') AS project_ids
+           FROM access.executors e
+           LEFT JOIN access.executor_projects ep ON ep.executor_id = e.id
+           WHERE e.id = ANY($1::uuid[]) AND e.deleted_at IS NULL
+           GROUP BY e.id
+           ORDER BY e.full_name ASC`,
           [ids],
         );
         callback(null, { items: result.rows.map(toExecutor) });

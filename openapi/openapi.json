@@ -799,6 +799,15 @@
               "type": "boolean",
               "default": false
             }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Ограничить каталог исполнителями, доступными в проекте",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -854,7 +863,8 @@
                 "type": "object",
                 "required": [
                   "lastName",
-                  "firstName"
+                  "firstName",
+                  "projectIds"
                 ],
                 "properties": {
                   "lastName": {
@@ -872,6 +882,15 @@
                   "position": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "projectIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
                   }
                 }
               }
@@ -941,8 +960,20 @@
                   "position": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "projectIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
                   }
-                }
+                },
+                "required": [
+                  "projectIds"
+                ]
               }
             }
           }
@@ -989,102 +1020,6 @@
         "responses": {
           "204": {
             "description": "Удален"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/executors/{executorId}/link": {
-      "post": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "linkExecutorUser",
-        "summary": "Связать исполнителя с пользователем",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ExecutorId"
-          },
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "userId"
-                ],
-                "properties": {
-                  "userId": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Связан",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Executor"
-                }
-              }
-            }
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "unlinkExecutorUser",
-        "summary": "Разорвать связь исполнителя с пользователем",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ExecutorId"
-          },
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Связь разорвана",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Executor"
-                }
-              }
-            }
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5077,16 +5012,6 @@
           "position": {
             "type": "string"
           },
-          "linkedUserId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "linkedUser": {
-            "$ref": "#/components/schemas/UserSummary"
-          },
           "isActive": {
             "type": "boolean"
           },
@@ -5097,11 +5022,19 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "projectIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         "required": [
           "lastName",
-          "firstName"
+          "firstName",
+          "projectIds"
         ]
       },
       "ProjectMembership": {

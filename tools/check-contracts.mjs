@@ -52,8 +52,8 @@ const missingMapping = operationIds.filter(
 );
 const staleMapping = mappedOperationIds.filter((operationId) => !operationIdSet.has(operationId));
 
-check(paths.length === 76, `OpenAPI paths: expected 76, got ${paths.length}`);
-check(operations === 99, `OpenAPI operations: expected 99, got ${operations}`);
+check(paths.length === 75, `OpenAPI paths: expected 75, got ${paths.length}`);
+check(operations === 97, `OpenAPI operations: expected 97, got ${operations}`);
 check(operationIds.length === operations, 'Every OpenAPI operation must have an operationId');
 check(
   operationIdSet.size === operationIds.length,
