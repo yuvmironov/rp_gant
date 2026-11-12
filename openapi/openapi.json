@@ -799,6 +799,15 @@
               "type": "boolean",
               "default": false
             }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Ограничить каталог исполнителями, доступными в проекте",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -854,7 +863,8 @@
                 "type": "object",
                 "required": [
                   "lastName",
-                  "firstName"
+                  "firstName",
+                  "projectIds"
                 ],
                 "properties": {
                   "lastName": {
@@ -872,6 +882,15 @@
                   "position": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "projectIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
                   }
                 }
               }
@@ -941,8 +960,20 @@
                   "position": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "projectIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
                   }
-                }
+                },
+                "required": [
+                  "projectIds"
+                ]
               }
             }
           }
@@ -989,102 +1020,6 @@
         "responses": {
           "204": {
             "description": "Удален"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/executors/{executorId}/link": {
-      "post": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "linkExecutorUser",
-        "summary": "Связать исполнителя с пользователем",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ExecutorId"
-          },
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "userId"
-                ],
-                "properties": {
-                  "userId": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Связан",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Executor"
-                }
-              }
-            }
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "unlinkExecutorUser",
-        "summary": "Разорвать связь исполнителя с пользователем",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ExecutorId"
-          },
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Связь разорвана",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Executor"
-                }
-              }
-            }
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -2189,7 +2124,7 @@
                 ],
                 "properties": {
                   "assignment": {
-                    "$ref": "#/components/schemas/AssignmentInput"
+                    "$ref": "#/components/schemas/DirectionResponsibleInput"
                   },
                   "baseRevision": {
                     "type": "integer",
@@ -2605,7 +2540,7 @@
           "Plan"
         ],
         "operationId": "setTaskAssignments",
-        "summary": "Назначить ответственного, исполнителя и соисполнителей",
+        "summary": "Назначить исполнителя и соисполнителей",
         "parameters": [
           {
             "$ref": "#/components/parameters/TaskId"
@@ -2629,9 +2564,9 @@
                 "properties": {
                   "assignments": {
                     "type": "array",
-                    "maxItems": 4,
+                    "maxItems": 3,
                     "items": {
-                      "$ref": "#/components/schemas/AssignmentInput"
+                      "$ref": "#/components/schemas/TaskAssignmentInput"
                     }
                   },
                   "baseRevision": {
@@ -5077,16 +5012,6 @@
           "position": {
             "type": "string"
           },
-          "linkedUserId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "linkedUser": {
-            "$ref": "#/components/schemas/UserSummary"
-          },
           "isActive": {
             "type": "boolean"
           },
@@ -5097,11 +5022,19 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "projectIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         "required": [
           "lastName",
-          "firstName"
+          "firstName",
+          "projectIds"
         ]
       },
       "ProjectMembership": {
@@ -5305,10 +5238,16 @@
             "format": "uuid"
           },
           "role": {
-            "$ref": "#/components/schemas/AssignmentRole"
+            "type": "string",
+            "enum": [
+              "responsible"
+            ]
           },
           "assigneeType": {
-            "$ref": "#/components/schemas/AssigneeType"
+            "type": "string",
+            "enum": [
+              "user"
+            ]
           },
           "assigneeId": {
             "type": "string",
@@ -5326,7 +5265,26 @@
           }
         }
       },
-      "AssignmentInput": {
+      "DirectionResponsibleInput": {
+        "type": "object",
+        "required": [
+          "assigneeType",
+          "assigneeId"
+        ],
+        "properties": {
+          "assigneeType": {
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          },
+          "assigneeId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TaskAssignmentInput": {
         "type": "object",
         "required": [
           "role",
@@ -5335,10 +5293,17 @@
         ],
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/AssignmentRole"
+            "type": "string",
+            "enum": [
+              "executor",
+              "co_executor"
+            ]
           },
           "assigneeType": {
-            "$ref": "#/components/schemas/AssigneeType"
+            "type": "string",
+            "enum": [
+              "user"
+            ]
           },
           "assigneeId": {
             "type": "string",
@@ -5399,7 +5364,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Assignment"
-            }
+            },
+            "maxItems": 1
           },
           "createdAt": {
             "type": "string",
@@ -5499,8 +5465,9 @@
           "assignments": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Assignment"
-            }
+              "$ref": "#/components/schemas/TaskAssignment"
+            },
+            "maxItems": 3
           },
           "commentsCount": {
             "type": "integer"
@@ -6783,6 +6750,43 @@
               "type": "string",
               "format": "uuid"
             }
+          }
+        }
+      },
+      "TaskAssignment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "executor",
+              "co_executor"
+            ]
+          },
+          "assigneeType": {
+            "type": "string",
+            "enum": [
+              "user",
+              "executor"
+            ]
+          },
+          "assigneeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "linkedUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolved": {
+            "type": "boolean"
           }
         }
       }

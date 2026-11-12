@@ -173,6 +173,148 @@ describe('auth email job creation', () => {
   });
 });
 
+describe('executor project scope', () => {
+  it('rejects executor creation without selected projects', async () => {
+    let connected = false;
+    const service = createUserImplementation({
+      db: {
+        async query() {
+          return { rowCount: 1, rows: [{}] };
+        },
+        async connect() {
+          connected = true;
+          throw new Error('should_not_connect');
+        },
+      },
+    });
+
+    const { error } = await invoke(service.CreateExecutor, {
+      last_name: 'Иванов',
+      first_name: 'Иван',
+      actor_user_id: '11111111-1111-4111-8111-111111111111',
+      project_ids: [],
+    });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toContain('executor_projects_required');
+    expect(connected).toBe(false);
+  });
+
+  it('stores selected projects atomically with the executor', async () => {
+    const executorId = '33333333-3333-4333-8333-333333333333';
+    const projectIds = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ];
+    const statements = [];
+    const executorRow = {
+      id: executorId,
+      last_name: 'Иванов',
+      first_name: 'Иван',
+      middle_name: null,
+      full_name: 'Иванов Иван',
+      position: null,
+      linked_user_id: null,
+      project_ids: projectIds,
+      is_active: true,
+    };
+    const client = {
+      async query(sql, params = []) {
+        statements.push({ sql, params });
+        if (sql.includes('INSERT INTO access.executors'))
+          return { rowCount: 1, rows: [{ id: executorId }] };
+        if (sql.includes('SELECT e.*')) return { rowCount: 1, rows: [executorRow] };
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const db = {
+      async query() {
+        return { rowCount: 1, rows: [{}] };
+      },
+      async connect() {
+        return client;
+      },
+    };
+    const service = createUserImplementation({ db });
+
+    const { error, response } = await invoke(service.CreateExecutor, {
+      last_name: 'Иванов',
+      first_name: 'Иван',
+      actor_user_id: '44444444-4444-4444-8444-444444444444',
+      project_ids: [...projectIds, projectIds[0]],
+    });
+
+    expect(error).toBeNull();
+    expect(response.executor.project_ids).toEqual(projectIds);
+    expect(
+      statements.filter(({ sql }) => sql.includes('INSERT INTO access.executor_projects')),
+    ).toHaveLength(2);
+    expect(statements.at(-1).sql).toBe('COMMIT');
+  });
+
+  it('filters executor catalog entries by their selected project', async () => {
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    const executorId = '33333333-3333-4333-8333-333333333333';
+    const queries = [];
+    const service = createUserImplementation({
+      db: {
+        async query(sql, params) {
+          queries.push({ sql, params });
+          return sql.includes('SELECT count(*)')
+            ? { rowCount: 1, rows: [{ total: 1 }] }
+            : {
+                rowCount: 1,
+                rows: [
+                  {
+                    id: executorId,
+                    last_name: 'Иванов',
+                    first_name: 'Иван',
+                    full_name: 'Иванов Иван',
+                    project_ids: [projectId],
+                    is_active: true,
+                  },
+                ],
+              };
+        },
+      },
+    });
+
+    const { error, response } = await invoke(service.ListExecutors, {
+      project_id: projectId,
+      page: { limit: 20, offset: 0 },
+    });
+
+    expect(error).toBeNull();
+    expect(response.items[0].project_ids).toEqual([projectId]);
+    expect(queries[0].sql).toContain('filter_ep.project_id = $3');
+    expect(queries[0].params[2]).toBe(projectId);
+  });
+
+  it('returns only active accounts with active project membership', async () => {
+    const ids = ['11111111-1111-4111-8111-111111111111'];
+    let queryText = '';
+    const service = createUserImplementation({
+      db: {
+        async query(sql) {
+          queryText = sql;
+          return { rowCount: 1, rows: [{ id: ids[0] }] };
+        },
+      },
+    });
+
+    const { error, response } = await invoke(service.GetActiveProjectMemberIds, {
+      project_id: '22222222-2222-4222-8222-222222222222',
+      user_ids: ids,
+    });
+
+    expect(error).toBeNull();
+    expect(response.user_ids).toEqual(ids);
+    expect(queryText).toContain("pm.status = 'active'");
+    expect(queryText).toContain("u.status = 'active'");
+  });
+});
+
 describe('session expiration', () => {
   it('revokes an expired non-remembered session when it is next validated', async () => {
     const queries = [];

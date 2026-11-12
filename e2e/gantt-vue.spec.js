@@ -101,9 +101,36 @@ test('nuxt gantt page renders tasks and edit modal', async ({ page }) => {
   await page.getByTitle('Создать задачу в направлении').first().click();
   await expect(page.locator('.task-modal')).toBeVisible();
   await expect(page.locator('.task-modal-direction')).toHaveValue(ids.directionId);
+  await expect(
+    page.locator('.task-modal label.field').filter({ hasText: 'Ответственный' }),
+  ).toHaveCount(0);
+  await expect(page.locator('.task-modal').getByText('Исполнитель', { exact: true })).toBeVisible();
+  await expect(
+    page.locator('.task-modal').getByText('Соисполнитель', { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.task-modal')).toContainText(
+    'Запись каталога сама по себе не даёт членство',
+  );
+  await expect(page.locator('.task-modal .assignment-members-link')).toHaveAttribute(
+    'href',
+    `/members?project=${ids.projectId}`,
+  );
+  await page.locator('.task-modal .assignment-members-link').click();
+  await expect(page).toHaveURL(`/members?project=${ids.projectId}`);
+  await expect(page.locator('.members-page')).toBeVisible();
+  await expect(page.locator('select[aria-label="Выбрать проект"]')).toHaveValue(ids.projectId);
+  await page.goto(`/gantt?project=${ids.projectId}&diagram=${ids.diagramId}`);
+  await expect(page.locator('.gantt-page')).toBeVisible();
+  await page.getByTitle('Создать задачу в направлении').first().click();
   await page.locator('.task-modal-head .btn-icon').click();
   await page.getByTitle('Редактировать направление').first().click();
   await expect(page.locator('.direction-modal')).toBeVisible();
+  await expect(
+    page.locator('.direction-modal label').filter({ hasText: 'Ответственный' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.direction-modal label').filter({ hasText: 'Исполнитель' }),
+  ).toHaveCount(0);
   await page.locator('.direction-modal-name').fill(`Direction ${suffix}`);
   await page.locator('.direction-modal button').filter({ hasText: 'Сохранить' }).click();
   await expect(page.locator('.gantt-labels')).toContainText(`Direction ${suffix}`);

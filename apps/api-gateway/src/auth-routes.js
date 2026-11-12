@@ -93,7 +93,7 @@ export function mapExecutor(executor) {
     middleName: executor.middle_name,
     fullName: executor.full_name,
     position: executor.position,
-    linkedUserId: executor.linked_user_id || null,
+    projectIds: executor.project_ids ?? [],
     isActive: executor.is_active,
   };
 }
@@ -576,6 +576,7 @@ export async function authRoutes(app, { userClient }) {
       const offset = Math.max(Number(request.query.offset ?? 0), 0);
       const response = await call(userClient, 'ListExecutors', {
         query: String(request.query.query ?? ''),
+        project_id: String(request.query.projectId ?? ''),
         include_inactive: request.query.includeInactive === 'true',
         page: { limit, offset },
       });

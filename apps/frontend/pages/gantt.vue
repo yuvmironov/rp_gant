@@ -54,7 +54,7 @@ const unreadCount = ref(0);
 const filterQuery = ref('');
 const filterStatus = ref('');
 const assignmentDraft = ref([]);
-const assignmentForm = reactive({ role: 'responsible', assigneeType: 'user', assigneeId: '' });
+const assignmentForm = reactive({ role: 'executor', assigneeId: '' });
 const projectForm = reactive({ name: '', description: '' });
 const showProjectForm = ref(false);
 const diagramForm = reactive({ name: '', description: '', dayMode: 'working' });
@@ -97,16 +97,24 @@ function syncFromTopScroll(event) {
   }
 }
 
-const modalPeople = computed(() => [
-  ...members.value.map((member) => ({
+function modalPeopleFor(role) {
+  const people = members.value.map((member) => ({
     value: `user:${member.userId}`,
     label: member.user?.displayName || member.user?.email || member.userId,
-  })),
-  ...executors.value.map((executor) => ({
-    value: `executor:${executor.id}`,
-    label: executor.fullName || executor.displayName || executor.id,
-  })),
-]);
+  }));
+  const legacy = editingTaskId.value
+    ? selectedTask.value?.assignments?.find(
+        (assignment) => assignment.role === role && assignment.assigneeType === 'executor',
+      )
+    : null;
+  if (legacy) {
+    people.push({
+      value: `executor:${legacy.assigneeId}`,
+      label: `${legacy.displayName || legacy.assigneeId} — старое назначение (замените участником проекта)`,
+    });
+  }
+  return people;
+}
 const newTask = reactive({
   estimatedHours: null,
   directionId: '',
@@ -120,7 +128,6 @@ const newTask = reactive({
   startDate: '',
   endDate: '',
   actualEndDate: '',
-  responsibleId: '',
   executorId: '',
   coExecutorId: '',
   predecessorId: '',
@@ -173,7 +180,7 @@ watchEffect((onCleanup) => {
 });
 const linkMode = ref(false);
 const linkFrom = ref(null);
-const selectedOwner = ref('');
+const selectedExecutor = ref('');
 const dragTaskId = ref('');
 const dragOverId = ref('');
 const dragOverMode = ref('');
@@ -250,19 +257,38 @@ function statusLabel(value) {
   }[value] ?? value;
 }
 
+async function loadAllPages(path, parameters = {}) {
+  const items = [];
+  let offset = 0;
+  let total = Infinity;
+  while (offset < total) {
+    const query = new URLSearchParams({ ...parameters, limit: '200', offset: String(offset) });
+    const response = await api(`${path}?${query}`);
+    const pageItems = response.items ?? [];
+    items.push(...pageItems);
+    total = Number(response.page?.total ?? items.length);
+    offset += pageItems.length;
+    if (!pageItems.length) break;
+  }
+  return items;
+}
+
 async function loadProjectContext() {
   if (!projectId.value) {
     members.value = [];
+    executors.value = [];
     diagrams.value = [];
     snapshot.value = null;
     return;
   }
-  const [memberResponse, executorResponse] = await Promise.all([
-    api(`/projects/${projectId.value}/members?limit=200`).catch(() => ({ items: [] })),
-    api('/executors?limit=200').catch(() => ({ items: [] })),
+  const [memberItems, executorItems] = await Promise.all([
+    loadAllPages(`/projects/${projectId.value}/members`).catch(() => []),
+    loadAllPages('/executors', { projectId: projectId.value }).catch(() => []),
   ]);
-  members.value = memberResponse.items ?? [];
-  executors.value = executorResponse.items ?? [];
+  members.value = memberItems.filter(
+    (member) => member.status === 'active' && member.user?.status === 'active',
+  );
+  executors.value = executorItems;
 }
 
 async function selectProject() {
@@ -300,7 +326,6 @@ function openTaskModal(prefill = {}) {
     endDate: '',
     actualEndDate: '',
     estimatedHours: null,
-    responsibleId: '',
     executorId: '',
     coExecutorId: '',
     predecessorId: '',
@@ -331,7 +356,6 @@ async function openTaskEditor(task) {
     endDate: task.endDate ? task.endDate.slice(0, 10) : '',
     actualEndDate: task.actualEndDate ? task.actualEndDate.slice(0, 10) : '',
     estimatedHours: task.estimatedHours ?? null,
-    responsibleId: '',
     executorId: '',
     coExecutorId: '',
     predecessorId: '',
@@ -340,7 +364,6 @@ async function openTaskEditor(task) {
   });
   showTaskModal.value = true;
   await selectTask(task);
-  newTask.responsibleId = assignmentValue('responsible');
   newTask.executorId = assignmentValue('executor');
   newTask.coExecutorId = assignmentValue('co_executor');
 }
@@ -361,13 +384,48 @@ function parseModalPerson(value) {
 }
 
 function modalAssignments() {
-  return [
-    ['responsible', newTask.responsibleId],
+  const assignments = [
     ['executor', newTask.executorId],
     ['co_executor', newTask.coExecutorId],
   ]
     .filter(([, value]) => value)
     .map(([role, value]) => ({ role, ...parseModalPerson(value) }));
+  if (!editingTaskId.value) return assignments;
+
+  const submittedKeys = new Set(
+    assignments.map((item) => `${item.role}:${item.assigneeType}:${item.assigneeId}`),
+  );
+  for (const existing of selectedTask.value?.assignments ?? []) {
+    const key = `${existing.role}:${existing.assigneeType}:${existing.assigneeId}`;
+    if (submittedKeys.has(key)) continue;
+    if (existing.role === 'co_executor') {
+      const primaryValue = assignmentValue('co_executor');
+      const primaryKey = primaryValue ? `co_executor:${primaryValue}` : '';
+      const newCoExecutor = assignments.find((item) => item.role === 'co_executor');
+      if (key !== primaryKey || !newCoExecutor) {
+        assignments.push({
+          role: existing.role,
+          assigneeType: existing.assigneeType,
+          assigneeId: existing.assigneeId,
+        });
+        submittedKeys.add(key);
+      }
+      continue;
+    }
+    if (
+      existing.role === 'executor' &&
+      existing.assigneeType === 'executor' &&
+      !assignments.some((item) => item.role === existing.role)
+    ) {
+      assignments.push({
+        role: existing.role,
+        assigneeType: existing.assigneeType,
+        assigneeId: existing.assigneeId,
+      });
+      submittedKeys.add(key);
+    }
+  }
+  return assignments;
 }
 
 async function saveTaskModal() {
@@ -548,21 +606,37 @@ async function loadSnapshot(preserveTask = false) {
 }
 
 function fillAssignments(task) {
-  assignmentDraft.value = (task.assignments ?? []).map((item) => ({
-    role: item.role,
-    assigneeType: item.assigneeType,
-    assigneeId: item.assigneeId,
-    displayName: item.displayName,
-  }));
-  assignmentForm.role = 'responsible';
-  assignmentForm.assigneeType = 'user';
+  assignmentDraft.value = (task.assignments ?? [])
+    .filter((item) => ['executor', 'co_executor'].includes(item.role))
+    .map((item) => ({
+      role: item.role,
+      assigneeType: item.assigneeType,
+      assigneeId: item.assigneeId,
+      displayName: item.displayName,
+    }));
+  assignmentForm.role = 'executor';
   assignmentForm.assigneeId = '';
 }
 
 function assignmentOptions(type) {
-  if (type === 'executor') return executors.value;
-  return members.value.map((member) => ({ id: member.userId, displayName: member.user?.displayName || member.user?.email }));
+  if (type === 'executor') {
+    return executors.value.map((executor) => ({
+      id: executor.id,
+      displayName: executor.fullName || executor.id,
+    }));
+  }
+  return members.value.map((member) => ({
+    id: member.userId,
+    displayName: member.user?.displayName || member.user?.email,
+  }));
 }
+
+watch(
+  () => assignmentForm.role,
+  () => {
+    assignmentForm.assigneeId = '';
+  },
+);
 
 function assignmentName(assignment) {
   return (
@@ -574,16 +648,17 @@ function assignmentName(assignment) {
 
 function addAssignment() {
   if (!assignmentForm.assigneeId) return;
+  const assigneeType = 'user';
   const duplicate = assignmentDraft.value.some(
     (item) =>
       item.role === assignmentForm.role &&
-      item.assigneeType === assignmentForm.assigneeType &&
+      item.assigneeType === assigneeType &&
       item.assigneeId === assignmentForm.assigneeId,
   );
   if (duplicate) return;
   assignmentDraft.value.push({
     role: assignmentForm.role,
-    assigneeType: assignmentForm.assigneeType,
+    assigneeType,
     assigneeId: assignmentForm.assigneeId,
   });
   assignmentForm.assigneeId = '';
@@ -1111,10 +1186,13 @@ async function logout() {
 const projectName = computed(
   () => projects.value.find((project) => project.id === projectId.value)?.name ?? 'Проект',
 );
+const projectMembersUrl = computed(
+  () => `/members?project=${encodeURIComponent(projectId.value)}`,
+);
 
 const ganttRows = computed(() => {
   const query = filterQuery.value.trim().toLowerCase();
-  const filtering = Boolean(query || filterStatus.value || selectedOwner.value);
+  const filtering = Boolean(query || filterStatus.value || selectedExecutor.value);
   const allTasks = snapshot.value?.tasks ?? [];
   const matches = (task) => {
     const matchesQuery =
@@ -1122,12 +1200,12 @@ const ganttRows = computed(() => {
       task.name?.toLowerCase().includes(query) ||
       task.wbsCode?.toLowerCase().includes(query);
     const matchesStatus = !filterStatus.value || task.status === filterStatus.value;
-    const matchesOwner =
-      !selectedOwner.value ||
+    const matchesExecutor =
+      !selectedExecutor.value ||
       (task.assignments ?? []).some(
-        (assignment) => assignment.role === 'responsible' && assignment.assigneeId === selectedOwner.value,
+        (assignment) => assignment.role === 'executor' && assignment.assigneeId === selectedExecutor.value,
       );
-    return matchesQuery && matchesStatus && matchesOwner;
+    return matchesQuery && matchesStatus && matchesExecutor;
   };
   const matched = new Set(allTasks.filter(matches).map((task) => task.id));
   const byId = new Map(allTasks.map((task) => [task.id, task]));
@@ -1267,7 +1345,8 @@ function taskTooltip(task) {
     task.actualEndDate ? `Факт: ${formatShortDate(task.actualEndDate)}` : '',
     Number(task.estimatedHours) > 0 ? `Часы: ${task.estimatedHours} ч` : '',
     `Статус: ${statusLabel(task.status)} · ${task.progress}% · ${task.priority}`,
-    responsibleName(task) ? `Ответственный: ${responsibleName(task)}` : '',
+    assignmentByRole(task, 'executor') ? `Исполнитель: ${assignmentByRole(task, 'executor')}` : '',
+    assignmentByRole(task, 'co_executor') ? `Соисполнитель: ${assignmentByRole(task, 'co_executor')}` : '',
     task.jiraNumber ? `Jira: ${task.jiraNumber}` : '',
     task.isCritical ? 'Критический путь' : task.float != null ? `Резерв: ${task.float} дн.` : '',
     task.commentsCount ? `Комментарии: ${task.commentsCount}` : '',
@@ -1703,11 +1782,6 @@ async function exportPdf() {
 
 function formatShortDate(value) {
   return value ? new Date(value).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
-}
-
-function responsibleName(task) {
-  const assignment = (task.assignments ?? []).find((item) => item.role === 'responsible');
-  return assignment ? assignmentName(assignment) : '';
 }
 
 function statusBadgeClass(statusValue) {
@@ -2222,13 +2296,13 @@ onMounted(async () => {
           <option value="blocked">Блокировано</option>
             <option value="postponed">Отложено</option>
         </select>
-        <select v-model="selectedOwner" class="input toolbar-input">
-          <option value="">Все ответственные</option>
+        <select v-model="selectedExecutor" class="input toolbar-input">
+          <option value="">Все исполнители</option>
           <option v-for="member in members" :key="member.userId" :value="member.userId">
             {{ member.user?.displayName || member.user?.email }}
           </option>
         </select>
-        <button v-if="filterQuery || filterStatus || selectedOwner" class="gantt-chip" type="button" @click="filterQuery = ''; filterStatus = ''; selectedOwner = ''">Сбросить</button>
+        <button v-if="filterQuery || filterStatus || selectedExecutor" class="gantt-chip" type="button" @click="filterQuery = ''; filterStatus = ''; selectedExecutor = ''">Сбросить</button>
         <button class="gantt-chip" type="button" @click="openDependency()">Связи</button>
         <button class="gantt-chip" :class="{ active: linkMode }" type="button" @click="toggleLinkMode">Связать</button>
         <span v-if="linkMode" class="gantt-chip active link-hint">
@@ -2352,7 +2426,8 @@ onMounted(async () => {
                 <button v-if="row.task.commentsCount" class="row-chip" type="button" @click.stop="openTaskEditor(row.task)">💬 {{ row.task.commentsCount }}</button>
                 <button class="row-chip flag-toggle" :class="{ 'flag-on': row.task.bpFlag }" type="button" @click.stop="toggleFlag(row.task, 'bpFlag')">БП</button>
                 <button class="row-chip flag-toggle" :class="{ 'flag-on': row.task.spFlag }" type="button" @click.stop="toggleFlag(row.task, 'spFlag')">СП</button>
-                <span v-if="responsibleName(row.task)" class="badge badge-neutral">{{ responsibleName(row.task) }}</span>
+                <span v-if="assignmentByRole(row.task, 'executor')" class="badge badge-neutral">Исполнитель: {{ assignmentByRole(row.task, 'executor') }}</span>
+                <span v-if="assignmentByRole(row.task, 'co_executor')" class="badge badge-neutral">Соисп.: {{ assignmentByRole(row.task, 'co_executor') }}</span>
                 <span class="badge badge-dot" :class="statusBadgeClass(row.task.status)">{{ statusLabel(row.task.status) }}</span>
                 <span class="badge badge-neutral">{{ row.task.progress }}%</span>
                 <span v-if="Number(row.task.estimatedHours) > 0" class="badge badge-neutral">{{ row.task.estimatedHours }} ч</span>
@@ -2501,23 +2576,25 @@ onMounted(async () => {
         <div class="stack">
           <div class="manage-list">
             <div v-for="(assignment, index) in assignmentDraft" :key="`${assignment.role}-${assignment.assigneeType}-${assignment.assigneeId}`" class="manage-item">
-              <span>{{ assignment.role === 'responsible' ? 'Ответственный' : assignment.role === 'executor' ? 'Исполнитель' : 'Соисполнитель' }}: {{ assignmentName(assignment) }}</span>
+              <span>{{ assignment.role === 'executor' ? 'Исполнитель' : 'Соисполнитель' }}: {{ assignmentName(assignment) }}</span>
               <button class="btn btn-ghost btn-sm" type="button" @click="removeAssignment(index)">Удалить</button>
             </div>
             <p v-if="!assignmentDraft.length" class="muted small">Назначений нет.</p>
           </div>
           <select v-model="assignmentForm.role" class="input">
-            <option value="responsible">Ответственный</option>
             <option value="executor">Исполнитель</option>
             <option value="co_executor">Соисполнитель</option>
           </select>
-          <select v-model="assignmentForm.assigneeType" class="input">
-            <option value="user">Пользователь</option>
-            <option value="executor">Исполнитель</option>
-          </select>
+          <div class="assignment-scope-note">
+            <p class="muted small">
+              Новые назначения доступны только активным участникам проекта. Запись каталога сама по себе не даёт членство.
+              Чтобы назначить этого человека, пригласите его учётную запись в проект и дождитесь принятия приглашения.
+            </p>
+            <a class="btn btn-ghost btn-sm assignment-members-link" :href="projectMembersUrl">Участники проекта</a>
+          </div>
           <select v-model="assignmentForm.assigneeId" class="input">
             <option value="">Выберите</option>
-            <option v-for="option in assignmentOptions(assignmentForm.assigneeType)" :key="option.id" :value="option.id">{{ option.displayName }}</option>
+            <option v-for="option in assignmentOptions('user')" :key="option.id" :value="option.id">{{ option.displayName }}</option>
           </select>
           <button class="btn btn-secondary" type="button" @click="addAssignment">Добавить назначение</button>
         </div>
@@ -2648,19 +2725,10 @@ onMounted(async () => {
             <input v-model="newTask.actualEndDate" class="input" type="date" />
           </label>
           <label class="field">
-            <span>Ответственный</span>
-            <select v-model="newTask.responsibleId" class="input">
-              <option value="">Не назначен</option>
-              <option v-for="person in modalPeople" :key="person.value" :value="person.value">
-                {{ person.label }}
-              </option>
-            </select>
-          </label>
-          <label class="field">
             <span>Исполнитель</span>
             <select v-model="newTask.executorId" class="input">
               <option value="">Не назначен</option>
-              <option v-for="person in modalPeople" :key="person.value" :value="person.value">
+              <option v-for="person in modalPeopleFor('executor')" :key="person.value" :value="person.value">
                 {{ person.label }}
               </option>
             </select>
@@ -2669,7 +2737,7 @@ onMounted(async () => {
             <span>Соисполнитель</span>
             <select v-model="newTask.coExecutorId" class="input">
               <option value="">Не назначен</option>
-              <option v-for="person in modalPeople" :key="person.value" :value="person.value">
+              <option v-for="person in modalPeopleFor('co_executor')" :key="person.value" :value="person.value">
                 {{ person.label }}
               </option>
             </select>
@@ -2685,6 +2753,13 @@ onMounted(async () => {
           </label>
           <label class="checkbox-line"><input v-model="newTask.bpFlag" type="checkbox" /> БП</label>
           <label class="checkbox-line"><input v-model="newTask.spFlag" type="checkbox" /> СП</label>
+        </div>
+        <div class="assignment-scope-note">
+          <p class="muted small">
+            Новые назначения доступны только активным участникам проекта. Запись каталога сама по себе не даёт членство.
+            Чтобы назначить этого человека, пригласите его учётную запись в проект и дождитесь принятия приглашения.
+          </p>
+          <a class="btn btn-ghost btn-sm assignment-members-link" :href="projectMembersUrl">Участники проекта</a>
         </div>
         <p v-if="autoTaskEnd" class="muted small">
           Окончание рассчитано автоматически: {{ formatShortDate(autoTaskEnd) }} ({{ newTask.estimatedHours }} ч,
@@ -3044,9 +3119,6 @@ onMounted(async () => {
         <span class="bar-tooltip-key">Статус:</span> {{ statusLabel(barTooltip.task.status) }} · {{ barTooltip.task.progress }}%
         <span class="bar-tooltip-key">· приоритет: {{ priorityLabel(barTooltip.task.priority) }}</span>
       </div>
-      <div v-if="assignmentByRole(barTooltip.task, 'responsible')">
-        <span class="bar-tooltip-key">Ответственный:</span> {{ assignmentByRole(barTooltip.task, 'responsible') }}
-      </div>
       <div v-if="assignmentByRole(barTooltip.task, 'executor')">
         <span class="bar-tooltip-key">Исполнитель:</span> {{ assignmentByRole(barTooltip.task, 'executor') }}
       </div>
@@ -3267,6 +3339,8 @@ onMounted(async () => {
 .task-modal-head h3 { margin: 2px 0 0; }
 .task-modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .task-modal-grid .full { grid-column: 1 / -1; }
+.assignment-scope-note { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.assignment-scope-note p { flex: 1 1 300px; margin: 0; }
 .task-modal-comments { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--color-border); display: grid; gap: 8px; }
 .comments-head { display: flex; align-items: baseline; gap: 8px; }
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }

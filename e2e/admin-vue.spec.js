@@ -12,6 +12,9 @@ test('admin can create admins and promote users', async ({ page }) => {
   await expect(page.locator('.projects-page')).toBeVisible();
 
   await page.goto('/admin');
+  await expect(page.locator('.executor-project-picker')).toContainText(
+    'Эта привязка управляет только видимостью записи каталога',
+  );
   const userForm = page
     .locator('form.inline')
     .filter({ has: page.locator('input[placeholder=Email]') });

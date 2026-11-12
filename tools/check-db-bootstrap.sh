@@ -30,6 +30,45 @@ assert_count rp_gant_user "SELECT count(*) FROM settings.system_settings" 16
 assert_count rp_gant_audit "SELECT count(*) FROM audit.audit_actions" 64
 assert_count rp_gant_sync "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'events' AND table_name = 'processed_events'" 1
 assert_count rp_gant_project "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'project' AND table_name = 'projects'" 1
+assert_count rp_gant_project "SELECT count(*) FROM pg_constraint WHERE conname = 'assignments_entity_role_assignee_check'" 1
+
+psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_project <<'SQL'
+BEGIN;
+DO $$
+DECLARE
+  rejected boolean;
+BEGIN
+  rejected := false;
+  BEGIN
+    INSERT INTO plan.assignments
+      (entity_type, entity_id, role, assignee_type, assignee_id, created_by_user_id)
+    VALUES
+      ('task', '11111111-1111-4111-8111-111111111111', 'responsible', 'user',
+       '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  IF NOT rejected THEN
+    RAISE EXCEPTION 'task responsible assignment was accepted';
+  END IF;
+
+  rejected := false;
+  BEGIN
+    INSERT INTO plan.assignments
+      (entity_type, entity_id, role, assignee_type, assignee_id, created_by_user_id)
+    VALUES
+      ('direction', '44444444-4444-4444-8444-444444444444', 'responsible', 'executor',
+       '55555555-5555-4555-8555-555555555555', '33333333-3333-4333-8333-333333333333');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  IF NOT rejected THEN
+    RAISE EXCEPTION 'catalog direction responsible assignment was accepted';
+  END IF;
+END;
+$$;
+ROLLBACK;
+SQL
 
 psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_user <<'SQL'
 BEGIN;

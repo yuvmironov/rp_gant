@@ -35,6 +35,8 @@ service UserService {
   rpc GetPermissions(GetPermissionsRequest) returns (GetPermissionsResponse);
   rpc ListAccessibleProjectIds(ListAccessibleProjectIdsRequest) returns (ListAccessibleProjectIdsResponse);
   rpc GetProjectAccess(GetProjectAccessRequest) returns (GetProjectAccessResponse);
+  rpc GetActiveProjectMemberIds(GetActiveProjectMemberIdsRequest) returns (GetActiveProjectMemberIdsResponse);
+  rpc RemoveExecutorProjectLinks(RemoveExecutorProjectLinksRequest) returns (RemoveExecutorProjectLinksResponse);
   rpc CheckProjectPermission(CheckProjectPermissionRequest) returns (CheckProjectPermissionResponse);
   rpc EnsureProjectOwner(EnsureProjectOwnerRequest) returns (EnsureProjectOwnerResponse);
   rpc SetProjectOwnerMembership(SetProjectOwnerMembershipRequest) returns (SetProjectOwnerMembershipResponse);
@@ -51,8 +53,13 @@ service UserService {
   rpc CreateExecutor(CreateExecutorRequest) returns (CreateExecutorResponse);
   rpc UpdateExecutor(UpdateExecutorRequest) returns (UpdateExecutorResponse);
   rpc DeleteExecutor(DeleteExecutorRequest) returns (DeleteExecutorResponse);
-  rpc LinkExecutorUser(LinkExecutorUserRequest) returns (LinkExecutorUserResponse);
-  rpc UnlinkExecutorUser(UnlinkExecutorUserRequest) returns (UnlinkExecutorUserResponse);
+  // Deprecated wire-compatibility methods. The server responds UNIMPLEMENTED.
+  rpc LinkExecutorUser(LinkExecutorUserRequest) returns (LinkExecutorUserResponse) {
+    option deprecated = true;
+  }
+  rpc UnlinkExecutorUser(UnlinkExecutorUserRequest) returns (UnlinkExecutorUserResponse) {
+    option deprecated = true;
+  }
   rpc GetNotificationContacts(GetNotificationContactsRequest) returns (GetNotificationContactsResponse);
   rpc CreateTelegramLinkCode(CreateTelegramLinkCodeRequest) returns (CreateTelegramLinkCodeResponse);
   rpc LinkTelegram(LinkTelegramRequest) returns (LinkTelegramResponse);
@@ -134,11 +141,12 @@ message Executor {
   string middle_name = 4;
   string full_name = 5;
   string position = 6;
-  string linked_user_id = 7;
-  UserSummary linked_user = 8;
+  string linked_user_id = 7 [deprecated = true];
+  UserSummary linked_user = 8 [deprecated = true];
   bool is_active = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  repeated string project_ids = 12;
 }
 
 message Role {
@@ -456,6 +464,23 @@ message GetProjectAccessResponse {
   rpgant.common.v1.ProjectAccess access = 1;
 }
 
+message GetActiveProjectMemberIdsRequest {
+  string project_id = 1;
+  repeated string user_ids = 2;
+}
+
+message GetActiveProjectMemberIdsResponse {
+  repeated string user_ids = 1;
+}
+
+message RemoveExecutorProjectLinksRequest {
+  string project_id = 1;
+}
+
+message RemoveExecutorProjectLinksResponse {
+  int32 deleted_count = 1;
+}
+
 message CheckProjectPermissionRequest {
   string user_id = 1;
   string project_id = 2;
@@ -570,6 +595,7 @@ message ListExecutorsRequest {
   rpgant.common.v1.PageRequest page = 1;
   string query = 2;
   bool include_inactive = 3;
+  string project_id = 4;
 }
 
 message ListExecutorsResponse {
@@ -591,6 +617,7 @@ message CreateExecutorRequest {
   string middle_name = 3;
   string position = 4;
   string actor_user_id = 5;
+  repeated string project_ids = 6;
 }
 
 message CreateExecutorResponse {
@@ -604,6 +631,8 @@ message UpdateExecutorRequest {
   optional string middle_name = 4;
   optional string position = 5;
   string actor_user_id = 6;
+  repeated string project_ids = 7;
+  bool update_project_ids = 8;
 }
 
 message UpdateExecutorResponse {
@@ -619,22 +648,27 @@ message DeleteExecutorResponse {
   bool deleted = 1;
 }
 
+// Deprecated wire-compatibility messages for retired account-link operations.
 message LinkExecutorUserRequest {
+  option deprecated = true;
   string executor_id = 1;
   string user_id = 2;
   string actor_user_id = 3;
 }
 
 message LinkExecutorUserResponse {
+  option deprecated = true;
   Executor executor = 1;
 }
 
 message UnlinkExecutorUserRequest {
+  option deprecated = true;
   string executor_id = 1;
   string actor_user_id = 2;
 }
 
 message UnlinkExecutorUserResponse {
+  option deprecated = true;
   Executor executor = 1;
 }
 

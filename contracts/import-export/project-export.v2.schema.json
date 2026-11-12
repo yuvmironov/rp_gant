@@ -90,38 +90,6 @@
       "type": "string",
       "format": "date-time"
     },
-    "assignment": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "role",
-        "assigneeType",
-        "assigneeId"
-      ],
-      "properties": {
-        "role": {
-          "type": "string",
-          "enum": [
-            "responsible",
-            "executor",
-            "co_executor"
-          ]
-        },
-        "assigneeType": {
-          "type": "string",
-          "enum": [
-            "user",
-            "executor"
-          ]
-        },
-        "assigneeId": {
-          "$ref": "#/$defs/uuid"
-        },
-        "displayName": {
-          "type": "string"
-        }
-      }
-    },
     "project": {
       "type": "object",
       "additionalProperties": false,
@@ -318,8 +286,9 @@
         "assignments": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/assignment"
-          }
+            "$ref": "#/$defs/directionAssignment"
+          },
+          "maxItems": 1
         }
       }
     },
@@ -420,8 +389,9 @@
         "assignments": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/assignment"
-          }
+            "$ref": "#/$defs/taskAssignment"
+          },
+          "maxItems": 3
         }
       }
     },
@@ -542,6 +512,62 @@
         },
         "updatedAt": {
           "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "directionAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "assigneeType",
+        "assigneeId"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "const": "responsible"
+        },
+        "assigneeType": {
+          "type": "string",
+          "const": "user"
+        },
+        "assigneeId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "displayName": {
+          "type": "string"
+        }
+      }
+    },
+    "taskAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "assigneeType",
+        "assigneeId"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "executor",
+            "co_executor"
+          ]
+        },
+        "assigneeType": {
+          "type": "string",
+          "enum": [
+            "user",
+            "executor"
+          ]
+        },
+        "assigneeId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "displayName": {
+          "type": "string"
         }
       }
     }

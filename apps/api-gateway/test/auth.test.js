@@ -3,7 +3,7 @@ import { buildApp } from '../src/app.js';
 
 const apps = [];
 
-function build(userClient) {
+function build(userClient, projectClient) {
   const app = buildApp({
     env: {
       PORT: '8080',
@@ -13,6 +13,7 @@ function build(userClient) {
     },
     logger: false,
     userClient,
+    projectClient,
   });
   apps.push(app);
   return app;
@@ -200,6 +201,85 @@ describe('api-gateway auth routes', () => {
 
     expect(response.statusCode).toBe(204);
     expect(response.headers['set-cookie'][0]).toContain('__Host-session=');
+  });
+
+  it('passes projectId through to the scoped executor catalog', async () => {
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    let request;
+    const app = build({
+      ValidateSession(_request, callback) {
+        callback(null, { user_id: 'user-1' });
+      },
+      ListExecutors(value, callback) {
+        request = value;
+        callback(null, {
+          items: [{ id: 'executor-1', project_ids: [projectId], is_active: true }],
+          page: { total: 1, limit: 100, offset: 0 },
+        });
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/executors?projectId=${projectId}`,
+      cookies: { '__Host-session': 'token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(request.project_id).toBe(projectId);
+    expect(response.json().items[0].projectIds).toEqual([projectId]);
+    expect(response.json().items[0]).not.toHaveProperty('linkedUserId');
+  });
+
+  it('requires an active project selection when creating an executor', async () => {
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    let createRequest;
+    const app = build(
+      {
+        ValidateSession(_request, callback) {
+          callback(null, { user_id: 'admin-1' });
+        },
+        GetUserRoles(_request, callback) {
+          callback(null, { global_roles: ['GLOBAL_ROLE_APP_ADMIN'] });
+        },
+        CreateExecutor(request, callback) {
+          createRequest = request;
+          callback(null, {
+            executor: {
+              id: 'executor-1',
+              last_name: 'Иванов',
+              first_name: 'Иван',
+              full_name: 'Иванов Иван',
+              project_ids: [projectId],
+              is_active: true,
+            },
+          });
+        },
+      },
+      {
+        ListProjects(request, callback) {
+          expect(request.user_id).toBe('admin-1');
+          expect(request.status).toBe('PROJECT_STATUS_ACTIVE');
+          callback(null, { items: [{ id: projectId }], page: { total: 1 } });
+        },
+      },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/executors',
+      cookies: { '__Host-session': 'token', '__Host-csrf': 'csrf' },
+      headers: { 'x-csrf-token': 'csrf' },
+      payload: {
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        projectIds: [projectId],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(createRequest.project_ids).toEqual([projectId]);
+    expect(response.json().projectIds).toEqual([projectId]);
   });
 
   it('issues a project-scoped sync token', async () => {

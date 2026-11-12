@@ -16,7 +16,45 @@ const auditAction = ref('');
 const auditActor = ref('');
 const newUser = ref({ email: '', lastName: '', firstName: '', appAdmin: false });
 const executors = ref([]);
-const newExecutor = ref({ lastName: '', firstName: '', middleName: '', position: '' });
+const activeProjects = ref([]);
+const editingExecutorId = ref('');
+const newExecutor = ref({ lastName: '', firstName: '', middleName: '', position: '', projectIds: [] });
+const usersPage = ref(1);
+const usersPerPage = ref(10);
+const usersTotal = ref(0);
+const executorsPage = ref(1);
+const executorsPerPage = ref(10);
+const executorsTotal = ref(0);
+
+const usersPageCount = computed(() => Math.max(1, Math.ceil(usersTotal.value / usersPerPage.value)));
+const executorsPageCount = computed(() =>
+  Math.max(1, Math.ceil(executorsTotal.value / executorsPerPage.value)),
+);
+const usersPageItems = computed(() => paginationItems(usersPage.value, usersPageCount.value));
+const executorsPageItems = computed(() =>
+  paginationItems(executorsPage.value, executorsPageCount.value),
+);
+const usersPaginationSummary = computed(() =>
+  paginationSummary(usersPage.value, usersPerPage.value, usersTotal.value),
+);
+const executorsPaginationSummary = computed(() =>
+  paginationSummary(executorsPage.value, executorsPerPage.value, executorsTotal.value),
+);
+
+function paginationItems(currentPage, pageCount) {
+  const visiblePages = Math.min(pageCount, 3);
+  const firstPage = Math.min(
+    Math.max(currentPage - Math.floor(visiblePages / 2), 1),
+    pageCount - visiblePages + 1,
+  );
+  return Array.from({ length: visiblePages }, (_, index) => firstPage + index);
+}
+
+function paginationSummary(currentPage, pageSize, total) {
+  if (total === 0) return 'Показано 0 из 0';
+  const start = (currentPage - 1) * pageSize + 1;
+  return `Показано ${start}–${Math.min(start + pageSize - 1, total)} из ${total}`;
+}
 
 function csrfToken() {
   return document.cookie
@@ -42,9 +80,35 @@ async function api(path, options = {}) {
 }
 
 async function loadUsers() {
-  const query = new URLSearchParams({ limit: '200' });
-  if (search.value) query.set('query', search.value);
-  users.value = (await api(`/users?${query}`)).items ?? [];
+  const query = new URLSearchParams({
+    limit: String(usersPerPage.value),
+    offset: String((usersPage.value - 1) * usersPerPage.value),
+  });
+  if (search.value.trim()) query.set('query', search.value.trim());
+  const response = await api(`/users?${query}`);
+  users.value = response.items ?? [];
+  usersTotal.value = Number(response.page?.total ?? users.value.length);
+  if (usersPage.value > usersPageCount.value) {
+    usersPage.value = usersPageCount.value;
+    return loadUsers();
+  }
+}
+
+function searchUsers() {
+  usersPage.value = 1;
+  return run(loadUsers);
+}
+
+function setUsersPageSize() {
+  usersPage.value = 1;
+  return run(loadUsers);
+}
+
+function goToUsersPage(page) {
+  const nextPage = Math.min(Math.max(page, 1), usersPageCount.value);
+  if (nextPage === usersPage.value) return;
+  usersPage.value = nextPage;
+  return run(loadUsers);
 }
 
 async function loadAudit() {
@@ -54,20 +118,85 @@ async function loadAudit() {
   audit.value = (await api(`/audit/events?${query}`)).items ?? [];
 }
 
+async function loadActiveProjects() {
+  const items = [];
+  let offset = 0;
+  let total = Infinity;
+  while (offset < total) {
+    const response = await api(`/projects?${new URLSearchParams({ limit: '200', offset: String(offset), status: 'active' })}`);
+    items.push(...(response.items ?? []));
+    total = Number(response.page?.total ?? items.length);
+    offset += (response.items ?? []).length;
+    if (!(response.items ?? []).length) break;
+  }
+  activeProjects.value = items;
+}
+
 async function loadExecutors() {
-  executors.value = (await api('/executors?limit=200&includeInactive=true')).items ?? [];
+  const query = new URLSearchParams({
+    limit: String(executorsPerPage.value),
+    offset: String((executorsPage.value - 1) * executorsPerPage.value),
+    includeInactive: 'true',
+  });
+  const response = await api(`/executors?${query}`);
+  executors.value = response.items ?? [];
+  executorsTotal.value = Number(response.page?.total ?? executors.value.length);
+  if (executorsPage.value > executorsPageCount.value) {
+    executorsPage.value = executorsPageCount.value;
+    return loadExecutors();
+  }
+}
+
+function setExecutorsPageSize() {
+  executorsPage.value = 1;
+  return run(loadExecutors);
+}
+
+function goToExecutorsPage(page) {
+  const nextPage = Math.min(Math.max(page, 1), executorsPageCount.value);
+  if (nextPage === executorsPage.value) return;
+  executorsPage.value = nextPage;
+  return run(loadExecutors);
 }
 
 async function loadUnread() {
   unreadCount.value = (await api('/notifications/unread-count').catch(() => ({ count: 0 }))).count ?? 0;
 }
 
-async function createExecutor() {
+async function saveExecutor() {
   await run(async () => {
-    await api('/executors', { method: 'POST', body: newExecutor.value });
-    newExecutor.value = { lastName: '', firstName: '', middleName: '', position: '' };
+    const editing = Boolean(editingExecutorId.value);
+    const path = editing ? `/executors/${editingExecutorId.value}` : '/executors';
+    await api(path, {
+      method: editing ? 'PATCH' : 'POST',
+      body: newExecutor.value,
+    });
+    cancelExecutorEdit();
     await loadExecutors();
   });
+}
+
+function editExecutor(item) {
+  editingExecutorId.value = item.id;
+  newExecutor.value = {
+    lastName: item.lastName,
+    firstName: item.firstName,
+    middleName: item.middleName ?? '',
+    position: item.position ?? '',
+    projectIds: (item.projectIds ?? []).filter((id) => activeProjects.value.some((project) => project.id === id)),
+  };
+}
+
+function cancelExecutorEdit() {
+  editingExecutorId.value = '';
+  newExecutor.value = { lastName: '', firstName: '', middleName: '', position: '', projectIds: [] };
+}
+
+function executorProjectNames(item) {
+  const names = (item.projectIds ?? [])
+    .map((id) => activeProjects.value.find((project) => project.id === id)?.name)
+    .filter(Boolean);
+  return names.length ? names.join(', ') : 'Нет активных проектов каталога';
 }
 
 async function deactivateExecutor(item) {
@@ -88,7 +217,7 @@ async function boot() {
       window.location.href = '/projects';
       return;
     }
-    await Promise.all([loadUsers(), loadAudit(), loadSettings(), loadExecutors(), loadUnread()]);
+    await Promise.all([loadUsers(), loadAudit(), loadSettings(), loadExecutors(), loadActiveProjects(), loadUnread()]);
   } catch (reason) {
     error.value = reason.message;
   } finally {
@@ -109,6 +238,7 @@ async function createUser() {
   await run(async () => {
     const created = await api('/admin/users', { method: 'POST', body: newUser.value });
     search.value = created.email;
+    usersPage.value = 1;
     newUser.value = { email: '', lastName: '', firstName: '', appAdmin: false };
     await loadUsers();
   });
@@ -180,7 +310,7 @@ onMounted(boot);
           <div class="admin-card-heading">
             <div>
               <p class="eyebrow">Доступ и роли</p>
-              <h2>Пользователи <span class="count-badge">{{ users.length }}</span></h2>
+              <h2>Пользователи <span class="count-badge">{{ usersTotal }}</span></h2>
             </div>
           </div>
           <form class="inline admin-user-form" @submit.prevent="createUser">
@@ -191,13 +321,13 @@ onMounted(boot);
             <button class="btn btn-primary" type="submit">Создать пользователя</button>
           </form>
           <div class="admin-toolbar">
-            <input v-model="search" class="input" placeholder="Поиск по имени или email" @keyup.enter="loadUsers" />
-            <button class="btn btn-secondary" type="button" @click="loadUsers">Найти</button>
+            <input v-model="search" class="input" placeholder="Поиск по имени или email" @keyup.enter="searchUsers" />
+            <button class="btn btn-secondary" type="button" @click="searchUsers">Найти</button>
           </div>
           <div class="table-wrap">
-            <table class="table">
+            <table class="table admin-table users-table">
               <thead>
-                <tr><th>Пользователь</th><th>Email</th><th>Статус</th><th>Роль</th><th /></tr>
+                <tr><th>Пользователь</th><th>Email</th><th>Статус</th><th>Роль</th><th>Действия</th></tr>
               </thead>
               <tbody>
                 <tr v-for="item in users" :key="item.id">
@@ -205,19 +335,47 @@ onMounted(boot);
                   <td>{{ item.email }}</td>
                   <td><span class="badge" :class="item.status === 'blocked' ? 'badge-danger' : 'badge-success'">{{ item.status === 'blocked' ? 'заблокирован' : 'активен' }}</span></td>
                   <td>{{ (item.globalRoles ?? []).includes('app_admin') ? 'админ' : 'пользователь' }}</td>
-                  <td class="actions">
-                    <button class="btn btn-secondary btn-sm" type="button" @click="toggleAdmin(item)">
-                      {{ (item.globalRoles ?? []).includes('app_admin') ? 'Снять админа' : 'Сделать админом' }}
-                    </button>
-                    <button class="btn btn-secondary btn-sm" type="button" @click="toggleBlock(item)">
-                      {{ item.status === 'blocked' ? 'Разблокировать' : 'Заблокировать' }}
-                    </button>
-                    <button class="btn btn-ghost btn-sm" type="button" @click="deleteUser(item)">Удалить</button>
+                  <td class="actions-cell">
+                    <div class="actions">
+                      <button class="btn btn-secondary btn-sm" type="button" @click="toggleAdmin(item)">
+                        {{ (item.globalRoles ?? []).includes('app_admin') ? 'Снять админа' : 'Сделать админом' }}
+                      </button>
+                      <button class="btn btn-secondary btn-sm" type="button" @click="toggleBlock(item)">
+                        {{ item.status === 'blocked' ? 'Разблокировать' : 'Заблокировать' }}
+                      </button>
+                      <button class="btn btn-ghost btn-sm" type="button" @click="deleteUser(item)">Удалить</button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+          <footer class="admin-pagination">
+            <span class="pagination-summary">{{ usersPaginationSummary }}</span>
+            <div class="pagination-controls">
+              <label class="page-size-control">
+                <span>Строк на странице</span>
+                <select v-model.number="usersPerPage" class="input" aria-label="Количество пользователей на странице" @change="setUsersPageSize">
+                  <option :value="5">5</option>
+                  <option :value="10">10</option>
+                </select>
+              </label>
+              <nav v-if="usersPageCount > 1" class="page-pagination" aria-label="Страницы пользователей">
+                <button class="btn btn-ghost btn-sm" type="button" aria-label="Предыдущая страница пользователей" :disabled="usersPage === 1" @click="goToUsersPage(usersPage - 1)">‹</button>
+                <button
+                  v-for="page in usersPageItems"
+                  :key="page"
+                  class="btn btn-ghost btn-sm"
+                  :class="{ 'page-current': usersPage === page }"
+                  type="button"
+                  :aria-label="`Страница ${page}`"
+                  :aria-current="usersPage === page ? 'page' : undefined"
+                  @click="goToUsersPage(page)"
+                >{{ page }}</button>
+                <button class="btn btn-ghost btn-sm" type="button" aria-label="Следующая страница пользователей" :disabled="usersPage === usersPageCount" @click="goToUsersPage(usersPage + 1)">›</button>
+              </nav>
+            </div>
+          </footer>
           <p v-if="!users.length" class="empty-state">Пользователи не найдены.</p>
         </section>
 
@@ -225,29 +383,78 @@ onMounted(boot);
           <div class="admin-card-heading">
             <div>
               <p class="eyebrow">Исполнители</p>
-              <h2>Каталог <span class="count-badge">{{ executors.length }}</span></h2>
+              <h2>Каталог <span class="count-badge">{{ executorsTotal }}</span></h2>
             </div>
           </div>
-          <form class="inline executor-form" @submit.prevent="createExecutor">
-            <input v-model="newExecutor.lastName" class="input" placeholder="Фамилия" required />
-            <input v-model="newExecutor.firstName" class="input" placeholder="Имя" required />
-            <input v-model="newExecutor.middleName" class="input" placeholder="Отчество" />
-            <input v-model="newExecutor.position" class="input" placeholder="Должность" />
-            <button class="btn btn-secondary" type="submit">Добавить</button>
+          <form class="executor-form" @submit.prevent="saveExecutor">
+            <div class="executor-fields">
+              <input v-model="newExecutor.lastName" class="input" placeholder="Фамилия" required />
+              <input v-model="newExecutor.firstName" class="input" placeholder="Имя" required />
+              <input v-model="newExecutor.middleName" class="input" placeholder="Отчество" />
+              <input v-model="newExecutor.position" class="input" placeholder="Должность" />
+            </div>
+            <label class="executor-project-picker">
+              <span>Проекты, где видна запись каталога <b>· обязательно</b></span>
+              <select v-model="newExecutor.projectIds" class="input" multiple required size="4" aria-label="Проекты исполнителя">
+                <option v-for="project in activeProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
+              </select>
+              <small v-if="!activeProjects.length">Нет активных проектов для выбора.</small>
+              <small v-else>
+                Эта привязка управляет только видимостью записи каталога; она не создаёт аккаунт и не добавляет пользователя в команду.
+                Для назначения в задаче нужна учётная запись с активным членством (раздел «Участники»).
+              </small>
+            </label>
+            <div class="executor-form-actions">
+              <button class="btn btn-secondary" type="submit" :disabled="!activeProjects.length">
+                {{ editingExecutorId ? 'Сохранить' : 'Добавить' }}
+              </button>
+              <button v-if="editingExecutorId" class="btn btn-ghost" type="button" @click="cancelExecutorEdit">Отмена</button>
+            </div>
           </form>
           <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>ФИО</th><th>Должность</th><th>Связан с пользователем</th><th /></tr></thead>
+            <table class="table admin-table executor-table">
+              <thead><tr><th>ФИО</th><th>Должность</th><th>Запись каталога видна в проектах</th><th>Действия</th></tr></thead>
               <tbody>
                 <tr v-for="item in executors" :key="item.id">
-                  <td class="name-cell">{{ item.fullName }}</td>
+                  <td class="name-cell">{{ item.fullName }}<span v-if="!item.isActive" class="executor-inactive">Неактивен</span></td>
                   <td>{{ item.position || '—' }}</td>
-                  <td>{{ item.linkedUserId || '—' }}</td>
-                  <td class="actions"><button class="btn btn-ghost btn-sm" type="button" @click="deactivateExecutor(item)">Деактивировать</button></td>
+                  <td>{{ executorProjectNames(item) }}</td>
+                  <td class="actions-cell">
+                    <div class="actions executor-actions">
+                      <button class="btn btn-secondary btn-sm" type="button" @click="editExecutor(item)">Изменить</button>
+                      <button class="btn btn-ghost btn-sm" type="button" @click="deactivateExecutor(item)">Деактивировать</button>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
+          <footer class="admin-pagination">
+            <span class="pagination-summary">{{ executorsPaginationSummary }}</span>
+            <div class="pagination-controls">
+              <label class="page-size-control">
+                <span>Строк на странице</span>
+                <select v-model.number="executorsPerPage" class="input" aria-label="Количество исполнителей на странице" @change="setExecutorsPageSize">
+                  <option :value="5">5</option>
+                  <option :value="10">10</option>
+                </select>
+              </label>
+              <nav v-if="executorsPageCount > 1" class="page-pagination" aria-label="Страницы исполнителей">
+                <button class="btn btn-ghost btn-sm" type="button" aria-label="Предыдущая страница исполнителей" :disabled="executorsPage === 1" @click="goToExecutorsPage(executorsPage - 1)">‹</button>
+                <button
+                  v-for="page in executorsPageItems"
+                  :key="page"
+                  class="btn btn-ghost btn-sm"
+                  :class="{ 'page-current': executorsPage === page }"
+                  type="button"
+                  :aria-label="`Страница ${page}`"
+                  :aria-current="executorsPage === page ? 'page' : undefined"
+                  @click="goToExecutorsPage(page)"
+                >{{ page }}</button>
+                <button class="btn btn-ghost btn-sm" type="button" aria-label="Следующая страница исполнителей" :disabled="executorsPage === executorsPageCount" @click="goToExecutorsPage(executorsPage + 1)">›</button>
+              </nav>
+            </div>
+          </footer>
           <p v-if="!executors.length" class="empty-state">Каталог исполнителей пуст.</p>
         </section>
 
@@ -394,15 +601,73 @@ onMounted(boot);
 
 .executor-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(100px, 1fr)) auto;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 14px;
+}
+
+.executor-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.executor-project-picker {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.executor-project-picker b {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.executor-project-picker select {
+  min-height: 112px;
+}
+
+.executor-project-picker small {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.executor-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.executor-inactive {
+  display: block;
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+}
+
+.executor-form .input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
 }
 
 .executor-form .btn {
   white-space: nowrap;
 }
 
+.executor-table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.executor-table th:nth-child(1) { width: 24%; }
+.executor-table th:nth-child(2) { width: 16%; }
+.executor-table th:nth-child(3) { width: 34%; }
+.executor-table th:nth-child(4) { width: 26%; }
+.executor-table .actions {
+  min-width: 0;
+  justify-content: flex-end;
+}
+.actions-cell { vertical-align: middle; }
+.executor-actions { justify-content: flex-end; }
 .audit-filters {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -486,6 +751,53 @@ onMounted(boot);
   text-align: center;
 }
 
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 4px 0;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.pagination-summary { white-space: nowrap; }
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-left: auto;
+}
+.page-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.page-size-control .input {
+  width: 68px;
+  min-height: var(--control-height-sm);
+  padding: 4px 8px;
+}
+.page-pagination {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.page-pagination .btn {
+  min-width: 34px;
+  justify-content: center;
+}
+.page-pagination .page-current {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+.page-pagination .btn:disabled { opacity: 0.45; }
+
 @media (max-width: 1100px) {
   .admin-user-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -495,7 +807,7 @@ onMounted(boot);
     justify-self: start;
   }
 
-  .executor-form {
+  .executor-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -511,9 +823,22 @@ onMounted(boot);
   }
 }
 
+@media (max-width: 720px) {
+  .admin-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pagination-controls {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+}
+
 @media (max-width: 560px) {
   .admin-user-form,
-  .executor-form,
+  .executor-fields,
   .audit-filters {
     grid-template-columns: 1fr;
   }

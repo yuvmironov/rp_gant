@@ -78,7 +78,22 @@ describe('notification consumer DLQ wiring', () => {
                 {
                   assigneeType: 'user',
                   assigneeId: '00000000-0000-0000-0000-000000000004',
-                  role: 'editor',
+                  role: 'executor',
+                },
+                {
+                  assigneeType: 'user',
+                  assigneeId: '00000000-0000-0000-0000-000000000005',
+                  role: 'co_executor',
+                },
+                {
+                  assigneeType: 'user',
+                  assigneeId: '00000000-0000-0000-0000-000000000006',
+                  role: 'responsible',
+                },
+                {
+                  assigneeType: 'executor',
+                  assigneeId: '00000000-0000-0000-0000-000000000007',
+                  role: 'executor',
                 },
               ],
             },
@@ -96,11 +111,17 @@ describe('notification consumer DLQ wiring', () => {
       'BEGIN',
       expect.stringContaining('SELECT 1 FROM events.processed_events'),
       expect.stringContaining('INSERT INTO notify.notifications'),
+      expect.stringContaining('INSERT INTO notify.notifications'),
       expect.stringContaining(
         "INSERT INTO events.processed_events (consumer, event_id) VALUES ('notification', $1)",
       ),
       'COMMIT',
     ]);
+    expect(
+      client.query.mock.calls
+        .filter(([sql]) => sql.includes('INSERT INTO notify.notifications'))
+        .map(([, params]) => params[0]),
+    ).toEqual(['00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000005']);
     expect(client.release).toHaveBeenCalledOnce();
     expect(mocks.producer.send).not.toHaveBeenCalled();
     expect(await metrics.registry.metrics()).toContain(
