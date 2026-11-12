@@ -779,11 +779,11 @@ onMounted(boot);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 12px 18px;
+  gap: 12px;
+  padding: 10px 14px;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .pagination-summary {
@@ -794,27 +794,27 @@ onMounted(boot);
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 16px;
+  gap: 12px;
   margin-left: auto;
 }
 
 .page-size-control {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
 }
 
 .page-size-select {
-  min-width: 68px;
-  height: 40px;
-  padding: 0 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 9px;
+  min-width: 56px;
+  height: var(--control-height-sm);
+  padding: 0 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -828,25 +828,25 @@ onMounted(boot);
   display: inline-flex;
   align-items: stretch;
   overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 11px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+  box-shadow: var(--shadow-xs);
 }
 
 .pagination button {
   display: grid;
-  width: 44px;
-  height: 40px;
+  width: 34px;
+  height: var(--control-height-sm);
   place-items: center;
   padding: 0;
   border: 0;
   border-right: 1px solid var(--color-border);
   border-radius: 0;
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
   font: inherit;
-  font-size: 17px;
+  font-size: var(--text-md);
   cursor: pointer;
   transition: background-color 140ms ease, color 140ms ease;
 }
@@ -949,6 +949,6 @@ onMounted(boot);
 @media (max-width: 520px) {
   .projects-footer-controls { align-items: flex-start; flex-direction: column; }
   .pagination { max-width: 100%; }
-  .pagination button { width: 40px; }
+  .pagination button { width: 34px; }
 }
 </style>

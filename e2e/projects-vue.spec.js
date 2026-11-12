@@ -79,6 +79,8 @@ test('projects page loads and paginates projects beyond the API page limit', asy
   await expect(page.locator('.project-row')).toHaveCount(10);
   await expect(page.locator('.projects-footer')).toContainText('Показано 1–10 из 263');
   await expect(page.getByLabel('Количество проектов на странице')).toHaveValue('10');
+  await expect(page.getByLabel('Количество проектов на странице')).toHaveCSS('height', '30px');
+  await expect(page.locator('.pagination button').nth(2)).toHaveCSS('height', '30px');
   expect(requestedActiveOffsets).toContain(200);
 
   await page.getByLabel('Количество проектов на странице').selectOption('20');
