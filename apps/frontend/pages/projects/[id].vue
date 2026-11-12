@@ -246,21 +246,7 @@ onMounted(boot);
 
 <template>
   <div class="app-shell">
-    <header class="app-header">
-      <a class="app-brand" href="/projects"><span class="brand-mark">▥</span><span>RP Gant</span></a>
-      <nav class="app-nav">
-        <a class="active" href="/projects">Проекты</a>
-        <a href="/members">Участники</a>
-        <a href="/notifications">Уведомления</a>
-        <a href="/profile">Профиль</a>
-        <a v-if="currentUser?.globalRoles?.includes('app_admin')" href="/admin">Админка</a>
-      </nav>
-      <div class="app-header-right">
-        <a class="header-icon notification-icon" href="/notifications" aria-label="Уведомления">🔔<span v-if="unreadCount" class="notice-dot">{{ unreadCount }}</span></a>
-        <div class="user-chip"><span class="avatar">{{ userInitials() }}</span><span>{{ currentUser?.displayName || currentUser?.email || 'Пользователь' }}</span></div>
-        <button class="btn btn-ghost btn-sm" type="button" @click="logout">Выйти</button>
-      </div>
-    </header>
+    <AppHeader :user="currentUser" :unread-count="unreadCount" active-page="projects" @logout="logout" />
 
     <main class="page project-page">
       <div class="breadcrumbs">
