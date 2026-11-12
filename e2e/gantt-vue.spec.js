@@ -104,11 +104,9 @@ test('nuxt gantt page renders tasks and edit modal', async ({ page }) => {
   await expect(
     page.locator('.task-modal label.field').filter({ hasText: 'Ответственный' }),
   ).toHaveCount(0);
+  await expect(page.locator('.task-modal').getByText('Исполнитель', { exact: true })).toBeVisible();
   await expect(
-    page.locator('.task-modal label.field').filter({ hasText: 'Исполнитель' }),
-  ).toBeVisible();
-  await expect(
-    page.locator('.task-modal label.field').filter({ hasText: 'Соисполнитель' }),
+    page.locator('.task-modal').getByText('Соисполнитель', { exact: true }),
   ).toBeVisible();
   await page.locator('.task-modal-head .btn-icon').click();
   await page.getByTitle('Редактировать направление').first().click();
