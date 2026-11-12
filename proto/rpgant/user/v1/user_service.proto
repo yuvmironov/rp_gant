@@ -53,6 +53,13 @@ service UserService {
   rpc CreateExecutor(CreateExecutorRequest) returns (CreateExecutorResponse);
   rpc UpdateExecutor(UpdateExecutorRequest) returns (UpdateExecutorResponse);
   rpc DeleteExecutor(DeleteExecutorRequest) returns (DeleteExecutorResponse);
+  // Deprecated wire-compatibility methods. The server responds UNIMPLEMENTED.
+  rpc LinkExecutorUser(LinkExecutorUserRequest) returns (LinkExecutorUserResponse) {
+    option deprecated = true;
+  }
+  rpc UnlinkExecutorUser(UnlinkExecutorUserRequest) returns (UnlinkExecutorUserResponse) {
+    option deprecated = true;
+  }
   rpc GetNotificationContacts(GetNotificationContactsRequest) returns (GetNotificationContactsResponse);
   rpc CreateTelegramLinkCode(CreateTelegramLinkCodeRequest) returns (CreateTelegramLinkCodeResponse);
   rpc LinkTelegram(LinkTelegramRequest) returns (LinkTelegramResponse);
@@ -135,8 +142,7 @@ message Executor {
   string full_name = 5;
   string position = 6;
   string linked_user_id = 7 [deprecated = true];
-  reserved 8;
-  reserved "linked_user";
+  UserSummary linked_user = 8 [deprecated = true];
   bool is_active = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
@@ -640,6 +646,30 @@ message DeleteExecutorRequest {
 
 message DeleteExecutorResponse {
   bool deleted = 1;
+}
+
+// Deprecated wire-compatibility messages for retired account-link operations.
+message LinkExecutorUserRequest {
+  option deprecated = true;
+  string executor_id = 1;
+  string user_id = 2;
+  string actor_user_id = 3;
+}
+
+message LinkExecutorUserResponse {
+  option deprecated = true;
+  Executor executor = 1;
+}
+
+message UnlinkExecutorUserRequest {
+  option deprecated = true;
+  string executor_id = 1;
+  string actor_user_id = 2;
+}
+
+message UnlinkExecutorUserResponse {
+  option deprecated = true;
+  Executor executor = 1;
 }
 
 message GetNotificationContactsRequest {
