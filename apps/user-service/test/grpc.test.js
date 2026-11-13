@@ -11,7 +11,7 @@ afterEach(async () => {
 describe('user-service gRPC contract', () => {
   it('loads all UserService methods from proto', () => {
     const service = loadUserService();
-    expect(Object.keys(service.service)).toHaveLength(54);
+    expect(Object.keys(service.service)).toHaveLength(55);
     expect(service.service).toHaveProperty('LinkExecutorUser');
     expect(service.service).toHaveProperty('UnlinkExecutorUser');
   });

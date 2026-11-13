@@ -52,8 +52,8 @@ const missingMapping = operationIds.filter(
 );
 const staleMapping = mappedOperationIds.filter((operationId) => !operationIdSet.has(operationId));
 
-check(paths.length === 75, `OpenAPI paths: expected 75, got ${paths.length}`);
-check(operations === 97, `OpenAPI operations: expected 97, got ${operations}`);
+check(paths.length === 76, `OpenAPI paths: expected 76, got ${paths.length}`);
+check(operations === 98, `OpenAPI operations: expected 98, got ${operations}`);
 check(operationIds.length === operations, 'Every OpenAPI operation must have an operationId');
 check(
   operationIdSet.size === operationIds.length,
@@ -80,7 +80,7 @@ check(
   staleMapping.length === 0,
   `REST/gRPC mapping has unknown operations: ${staleMapping.join(', ')}`,
 );
-check(Object.keys(openapi.components?.schemas ?? {}).length === 74, 'OpenAPI schemas: expected 74');
+check(Object.keys(openapi.components?.schemas ?? {}).length === 76, 'OpenAPI schemas: expected 76');
 const taskAssignmentInput =
   openapi.paths?.['/tasks/{taskId}/assignments']?.put?.requestBody?.content?.['application/json']
     ?.schema?.properties?.assignments;

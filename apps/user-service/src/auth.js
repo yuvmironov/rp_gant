@@ -259,7 +259,7 @@ function invitationLink(publicAppUrl, token) {
 }
 
 function resetLink(publicAppUrl, token) {
-  return `${publicAppUrl.replace(/\/$/, '')}/login?reset=${encodeURIComponent(token)}`;
+  return `${publicAppUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
 }
 
 async function queueAuthEmail(
@@ -933,6 +933,31 @@ export function createUserImplementation({
         callback(mapDbError(error));
       } finally {
         client?.release();
+      }
+    },
+
+    async ValidatePasswordResetToken(call, callback) {
+      const token = String(call.request.token ?? '');
+      if (!token) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'token_required'));
+        return;
+      }
+
+      try {
+        const result = await db.query(
+          `SELECT u.email
+           FROM access.password_reset_tokens t
+           JOIN access.users u ON u.id = t.user_id
+           WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > now()`,
+          [hashToken(token)],
+        );
+        if (result.rowCount === 0) {
+          callback(grpcError(status.INVALID_ARGUMENT, 'invalid_token'));
+          return;
+        }
+        callback(null, { email: result.rows[0].email });
+      } catch (error) {
+        callback(mapDbError(error));
       }
     },
 

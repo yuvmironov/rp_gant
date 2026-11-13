@@ -306,6 +306,17 @@ export async function authRoutes(app, { userClient }) {
     }
   });
 
+  app.post('/api/v1/auth/password/reset/validate', async (request, reply) => {
+    try {
+      const response = await call(userClient, 'ValidatePasswordResetToken', {
+        token: request.body?.token,
+      });
+      return reply.send({ email: response.email });
+    } catch (error) {
+      return sendProblem(reply, request, error);
+    }
+  });
+
   app.post('/api/v1/auth/password/reset', async (request, reply) => {
     try {
       const response = await call(userClient, 'ResetPassword', {

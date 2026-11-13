@@ -10,6 +10,7 @@ test('direction end covers all nested tasks', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('Direction');
   await page.locator('#register-form input[name=firstName]').fill('Dates');
   await page.locator('#register-form input[name=password]').fill('Direction123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('Direction123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

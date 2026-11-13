@@ -17,6 +17,7 @@ operations:
   listMySessions: { service: UserService, method: ListMySessions }
   revokeMySession: { service: UserService, method: RevokeMySession }
   requestPasswordReset: { service: UserService, method: RequestPasswordReset }
+  validatePasswordResetToken: { service: UserService, method: ValidatePasswordResetToken }
   resetPassword: { service: UserService, method: ResetPassword }
   changePassword: { service: UserService, method: ChangePassword }
   listUsers: { service: UserService, method: ListUsers }

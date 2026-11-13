@@ -15,6 +15,7 @@ test('local Vue MVP workflow', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('MVP');
   await page.locator('#register-form input[name=firstName]').fill('Tester');
   await page.locator('#register-form input[name=password]').fill(password);
+  await page.locator('#register-form input[name=confirmPassword]').fill(password);
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

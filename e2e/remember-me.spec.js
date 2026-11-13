@@ -6,6 +6,7 @@ async function register(page, email, password) {
   await page.locator('#register-form input[name=lastName]').fill('Remember');
   await page.locator('#register-form input[name=firstName]').fill('Tester');
   await page.locator('#register-form input[name=password]').fill(password);
+  await page.locator('#register-form input[name=confirmPassword]').fill(password);
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 }

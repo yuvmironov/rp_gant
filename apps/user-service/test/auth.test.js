@@ -167,9 +167,91 @@ describe('auth email job creation', () => {
       'password_reset',
     ]);
     expect(JSON.parse(job.params[4])).toMatchObject({
-      link: expect.stringMatching(/^https:\/\/app\.example\.com\/login\?reset=/),
+      link: expect.stringMatching(/^https:\/\/app\.example\.com\/reset-password\?token=/),
     });
     expect(job.params[5]).toBe('ru-RU');
+  });
+});
+
+describe('password reset', () => {
+  it('returns the account email only for a live reset token', async () => {
+    let request;
+    const service = createUserImplementation({
+      db: {
+        async query(sql, params) {
+          request = { sql, params };
+          return { rowCount: 1, rows: [{ email: 'person@example.com' }] };
+        },
+      },
+    });
+
+    const { error, response } = await invoke(service.ValidatePasswordResetToken, {
+      token: 'secret-reset-token',
+    });
+
+    expect(error).toBeNull();
+    expect(response).toEqual({ email: 'person@example.com' });
+    expect(request.sql).toContain('t.used_at IS NULL AND t.expires_at > now()');
+    expect(request.params[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(request.params[0]).not.toBe('secret-reset-token');
+  });
+
+  it('rejects an unknown, expired, or already-used reset token', async () => {
+    const service = createUserImplementation({
+      db: {
+        async query() {
+          return { rowCount: 0, rows: [] };
+        },
+      },
+    });
+
+    const { error } = await invoke(service.ValidatePasswordResetToken, { token: 'stale-token' });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('invalid_token');
+  });
+
+  it('persists the new Argon2 password, consumes the token, and revokes sessions', async () => {
+    const statements = [];
+    let storedHash;
+    const client = {
+      async query(sql, params = []) {
+        statements.push({ sql, params });
+        if (sql.includes('SELECT id, user_id FROM access.password_reset_tokens')) {
+          return { rowCount: 1, rows: [{ id: 'reset-1', user_id: 'user-1' }] };
+        }
+        if (sql.includes('UPDATE access.users SET password_hash')) storedHash = params[1];
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const db = {
+      async connect() {
+        return client;
+      },
+      async query() {
+        return { rowCount: 0, rows: [] };
+      },
+    };
+    const service = createUserImplementation({ db });
+
+    const { error, response } = await invoke(service.ResetPassword, {
+      token: 'valid-reset-token',
+      new_password: 'NewPassword456!',
+    });
+
+    expect(error).toBeNull();
+    expect(response.reset).toBe(true);
+    expect(storedHash).toMatch(/^\$argon2id\$/);
+    expect(await verifyPassword(storedHash, 'NewPassword456!')).toBe(true);
+    expect(await verifyPassword(storedHash, 'OldPassword123!')).toBe(false);
+    expect(
+      statements.some(({ sql }) => sql.includes('UPDATE access.password_reset_tokens SET used_at')),
+    ).toBe(true);
+    expect(
+      statements.some(({ sql }) => sql.includes('UPDATE access.user_sessions SET revoked_at')),
+    ).toBe(true);
+    expect(statements.some(({ sql }) => sql === 'COMMIT')).toBe(true);
   });
 });
 

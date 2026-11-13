@@ -8,6 +8,7 @@ test('drag task into parent updates hierarchy', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('Drag');
   await page.locator('#register-form input[name=firstName]').fill('Tester');
   await page.locator('#register-form input[name=password]').fill('DragPassword123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('DragPassword123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

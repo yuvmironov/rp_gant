@@ -2,6 +2,10 @@
 const tab = ref('login');
 const email = ref('');
 const password = ref('');
+const confirmPassword = ref('');
+const showLoginPassword = ref(false);
+const showRegistrationPassword = ref(false);
+const showConfirmPassword = ref(false);
 const rememberMe = ref(true);
 const lastName = ref('');
 const firstName = ref('');
@@ -15,14 +19,12 @@ watch(message, (value) => {
   if (value) toast.success(value);
 });
 
-const resetToken = ref('');
-const newPassword = ref('');
-const showReset = ref(false);
-
 function friendlyError(message) {
-  return String(message).includes('session_limit_reached')
-    ? 'Достигнут лимит двух активных сессий'
-    : message;
+  if (String(message).includes('session_limit_reached')) return 'Достигнут лимит двух активных сессий';
+  if (String(message).includes('email_not_verified')) {
+    return 'Email не подтверждён. Проверьте почту или запросите письмо ещё раз.';
+  }
+  return message;
 }
 
 function csrfToken() {
@@ -79,8 +81,13 @@ async function submitLogin() {
 
 async function submitRegister() {
   error.value = '';
+  message.value = '';
+  if (password.value !== confirmPassword.value) {
+    error.value = 'Пароли не совпадают.';
+    return;
+  }
   try {
-    await api('/auth/register', {
+    const result = await api('/auth/register', {
       method: 'POST',
       body: {
         email: email.value,
@@ -90,43 +97,44 @@ async function submitRegister() {
         displayName: `${lastName.value} ${firstName.value}`.trim(),
       },
     });
+    if (result.requiresEmailVerification) {
+      tab.value = 'login';
+      confirmPassword.value = '';
+      message.value = 'Аккаунт создан. Подтвердите email по ссылке из письма, чтобы войти.';
+      return;
+    }
     await api('/auth/login', {
       method: 'POST',
       body: { email: email.value, password: password.value },
     });
     await finishLogin();
   } catch (reason) {
-    error.value = reason.message;
+    error.value = friendlyError(reason.message);
   }
 }
 
 async function requestReset() {
   error.value = '';
   message.value = '';
+  if (!email.value.trim()) {
+    error.value = 'Укажите email.';
+    return;
+  }
   try {
     await api('/auth/password/forgot', { method: 'POST', body: { email: email.value } });
-    showReset.value = true;
     message.value = 'Если адрес зарегистрирован, инструкция по сбросу пароля будет отправлена на него.';
   } catch (reason) {
     error.value = reason.message;
   }
 }
 
-async function resetPassword() {
-  error.value = '';
-  try {
-    await api('/auth/password/reset', {
-      method: 'POST',
-      body: { token: resetToken.value, newPassword: newPassword.value },
-    });
-    showReset.value = false;
-    message.value = 'Пароль сброшен. Войдите с новым паролем.';
-  } catch (reason) {
-    error.value = reason.message;
-  }
-}
-
 async function resendVerification() {
+  error.value = '';
+  message.value = '';
+  if (!email.value.trim()) {
+    error.value = 'Укажите email.';
+    return;
+  }
   try {
     await api('/auth/email/resend', { method: 'POST', body: { email: email.value } });
     message.value = 'Письмо отправлено, если регистрация не завершена.';
@@ -150,10 +158,10 @@ onMounted(async () => {
     }
   }
   if (reset) {
-    resetToken.value = reset;
-    showReset.value = true;
+    await navigateTo({ path: '/reset-password', query: { token: reset } }, { replace: true });
+    return;
   }
-  if (verify || reset || invitation) window.history.replaceState({}, '', '/login');
+  if (verify || invitation) window.history.replaceState({}, '', '/login');
   try {
     await api('/auth/session');
     await finishLogin();
@@ -208,7 +216,10 @@ onMounted(async () => {
           </div>
           <div class="field">
             <label for="login-password">Пароль</label>
-            <input id="login-password" v-model="password" class="input" name="password" type="password" autocomplete="current-password" required />
+            <div class="password-control">
+              <input id="login-password" v-model="password" class="input" name="password" :type="showLoginPassword ? 'text' : 'password'" autocomplete="current-password" required />
+              <button class="password-toggle" type="button" :aria-label="showLoginPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showLoginPassword = !showLoginPassword">{{ showLoginPassword ? 'Скрыть' : 'Показать' }}</button>
+            </div>
           </div>
           <div class="auth-row">
             <label class="checkbox-line" for="remember-me">
@@ -223,24 +234,29 @@ onMounted(async () => {
 
         <form v-else id="register-form" class="form-stack" @submit.prevent="submitRegister">
           <div class="field">
-            <label>Email</label>
-            <input v-model="email" class="input" name="email" type="email" required />
+            <label for="register-email">Email</label>
+            <input id="register-email" v-model="email" class="input" name="email" type="email" autocomplete="email" required />
           </div>
           <div class="field-row">
             <div class="field"><label>Фамилия</label><input v-model="lastName" class="input" name="lastName" required /></div>
             <div class="field"><label>Имя</label><input v-model="firstName" class="input" name="firstName" required /></div>
           </div>
           <div class="field">
-            <label>Пароль</label>
-            <input v-model="password" class="input" name="password" type="password" minlength="8" required />
+            <label for="register-password">Пароль</label>
+            <div class="password-control">
+              <input id="register-password" v-model="password" class="input" name="password" :type="showRegistrationPassword ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" required />
+              <button class="password-toggle" type="button" :aria-label="showRegistrationPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showRegistrationPassword = !showRegistrationPassword">{{ showRegistrationPassword ? 'Скрыть' : 'Показать' }}</button>
+            </div>
+            <span class="field-hint">Не менее 8 символов</span>
+          </div>
+          <div class="field">
+            <label for="register-confirm-password">Подтверждение пароля</label>
+            <div class="password-control">
+              <input id="register-confirm-password" v-model="confirmPassword" class="input" name="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" required />
+              <button class="password-toggle" type="button" :aria-label="showConfirmPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showConfirmPassword = !showConfirmPassword">{{ showConfirmPassword ? 'Скрыть' : 'Показать' }}</button>
+            </div>
           </div>
           <button class="btn btn-primary btn-lg btn-block auth-submit" type="submit">Создать аккаунт</button>
-        </form>
-
-        <form v-if="showReset" class="form-stack reset-form" @submit.prevent="resetPassword">
-          <div class="field"><label>Токен</label><input v-model="resetToken" class="input" required /></div>
-          <div class="field"><label>Новый пароль</label><input v-model="newPassword" class="input" type="password" minlength="8" required /></div>
-          <button class="btn btn-primary btn-lg btn-block" type="submit">Обновить пароль</button>
         </form>
 
       </div>
@@ -262,7 +278,11 @@ onMounted(async () => {
 .auth-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .link-button { border: 0; background: transparent; color: var(--color-primary); padding: 0; font-size: var(--text-sm); }
 .link-button.centered { justify-self: center; }
-.reset-form { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--color-border); }
+.password-control { display: flex; align-items: stretch; }
+.password-control .input { min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.password-toggle { flex: 0 0 auto; padding: 0 12px; border: 1px solid var(--color-border-strong); border-left: 0; border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--color-surface-muted); color: var(--color-primary-700); font-size: var(--text-sm); font-weight: 650; }
+.password-toggle:hover { background: var(--color-primary-50); }
+.password-toggle:focus-visible { position: relative; z-index: 1; outline: none; box-shadow: var(--focus-ring); }
 .check:before { content: none; }
 .auth-point .check { color: #fff; font-weight: 700; }
 .message, .error { margin-top: 16px; }
