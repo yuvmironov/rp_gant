@@ -458,6 +458,44 @@
         }
       }
     },
+    "/auth/password/reset/validate": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "validatePasswordResetToken",
+        "summary": "Проверить ссылку сброса пароля",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidatePasswordResetTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ссылка действительна",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidatePasswordResetTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/auth/password/reset": {
       "post": {
         "tags": [
@@ -6207,6 +6245,30 @@
           "rememberMe": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "ValidatePasswordResetTokenRequest": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "writeOnly": true
+          }
+        }
+      },
+      "ValidatePasswordResetTokenResponse": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
           }
         }
       },

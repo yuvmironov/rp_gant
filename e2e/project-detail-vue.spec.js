@@ -12,6 +12,7 @@ test('project detail shows diagrams and members', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('Project');
   await page.locator('#register-form input[name=firstName]').fill('Detail');
   await page.locator('#register-form input[name=password]').fill('Project123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('Project123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

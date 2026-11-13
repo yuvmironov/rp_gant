@@ -10,6 +10,7 @@ test('dragging a task bar does not open the editor', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('Bar');
   await page.locator('#register-form input[name=firstName]').fill('Drag');
   await page.locator('#register-form input[name=password]').fill('BarDrag123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('BarDrag123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

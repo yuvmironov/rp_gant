@@ -9,6 +9,7 @@ test('task comments are isolated by task', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('Comment');
   await page.locator('#register-form input[name=firstName]').fill('Tester');
   await page.locator('#register-form input[name=password]').fill('Comment123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('Comment123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

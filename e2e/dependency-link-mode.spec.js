@@ -10,6 +10,7 @@ test('link mode supports directions and task-to-direction', async ({ page }) => 
   await page.locator('#register-form input[name=lastName]').fill('Dependency');
   await page.locator('#register-form input[name=firstName]').fill('Links');
   await page.locator('#register-form input[name=password]').fill('Dependency123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('Dependency123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

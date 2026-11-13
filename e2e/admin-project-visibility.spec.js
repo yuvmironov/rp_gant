@@ -11,6 +11,7 @@ test('app_admin can list a project without membership', async ({ page }) => {
   await page.locator('#register-form input[name=lastName]').fill('Visibility');
   await page.locator('#register-form input[name=firstName]').fill('Tester');
   await page.locator('#register-form input[name=password]').fill('VisibilityPassword123!');
+  await page.locator('#register-form input[name=confirmPassword]').fill('VisibilityPassword123!');
   await page.locator('#register-form button[type=submit]').click();
   await expect(page.locator('.projects-page')).toBeVisible({ timeout: 20_000 });
 

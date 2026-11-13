@@ -71,6 +71,26 @@ describe('api-gateway auth routes', () => {
     });
   });
 
+  it('returns the account email for a valid password-reset token', async () => {
+    let received;
+    const app = build({
+      ValidatePasswordResetToken(request, callback) {
+        received = request;
+        callback(null, { email: 'user@example.test' });
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/password/reset/validate',
+      payload: { token: 'reset-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ email: 'user@example.test' });
+    expect(received).toEqual({ token: 'reset-token' });
+  });
+
   it('forwards Set-Cookie and maps login response', async () => {
     const app = build({
       Login(_request, callback) {
