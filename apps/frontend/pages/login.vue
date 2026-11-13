@@ -24,6 +24,9 @@ function friendlyError(message) {
   if (String(message).includes('email_not_verified')) {
     return 'Email не подтверждён. Проверьте почту или запросите письмо ещё раз.';
   }
+  if (String(message).includes('invalid_token') || String(message).includes('token_required')) {
+    return 'Ссылка подтверждения недействительна или истекла. Запросите новое письмо.';
+  }
   return message;
 }
 
@@ -151,11 +154,15 @@ onMounted(async () => {
   if (invitation) window.localStorage.setItem('pendingInvitation', invitation);
   if (verify) {
     try {
-      await api('/auth/email/verify', { method: 'POST', body: { token: verify } });
-      message.value = 'Email подтверждён. Войдите.';
+      const result = await api('/auth/email/verify', { method: 'POST', body: { token: verify } });
+      if (result?.verified !== true) throw new Error('email_verification_failed');
+      window.history.replaceState({}, '', '/login');
+      await navigateTo('/email-confirmed', { replace: true });
     } catch (reason) {
-      error.value = reason.message;
+      window.history.replaceState({}, '', '/login');
+      error.value = friendlyError(reason.message);
     }
+    return;
   }
   if (reset) {
     await navigateTo({ path: '/reset-password', query: { token: reset } }, { replace: true });

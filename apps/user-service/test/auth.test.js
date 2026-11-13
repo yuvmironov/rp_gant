@@ -65,6 +65,53 @@ describe('auth email job creation', () => {
       'person@example.com',
       'email_verification',
     ]);
+    const verificationLink = new URL(JSON.parse(transaction[jobIndex].params[4]).link);
+    expect(verificationLink.pathname).toBe('/login');
+    expect(verificationLink.searchParams.get('verify')).toBeTruthy();
+  });
+
+  it('sends resend-verification emails to the login route', async () => {
+    const queries = [];
+    const client = {
+      async query(sql, params = []) {
+        queries.push({ sql, params });
+        if (sql.includes('SELECT * FROM access.users')) {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                id: 'user-1',
+                email: 'person@example.com',
+                locale: 'ru-RU',
+                email_verified_at: null,
+              },
+            ],
+          };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const service = createUserImplementation({
+      db: {
+        async connect() {
+          return client;
+        },
+      },
+      publicAppUrl: 'https://app.example.com/',
+    });
+
+    const { error, response } = await invoke(service.ResendEmailVerification, {
+      email: 'PERSON@example.com',
+    });
+
+    expect(error).toBeNull();
+    expect(response).toEqual({ accepted: true });
+    const job = queries.find(({ sql }) => sql.includes('INSERT INTO jobs.auth_email_jobs'));
+    const verificationLink = new URL(JSON.parse(job.params[4]).link);
+    expect(verificationLink.origin).toBe('https://app.example.com');
+    expect(verificationLink.pathname).toBe('/login');
+    expect(verificationLink.searchParams.get('verify')).toBeTruthy();
   });
 
   it('commits a new project invitation and its email job together', async () => {
@@ -170,6 +217,71 @@ describe('auth email job creation', () => {
       link: expect.stringMatching(/^https:\/\/app\.example\.com\/reset-password\?token=/),
     });
     expect(job.params[5]).toBe('ru-RU');
+  });
+});
+
+describe('email verification', () => {
+  it('consumes a live verification token and marks the user email verified', async () => {
+    const statements = [];
+    const client = {
+      async query(sql, params = []) {
+        statements.push({ sql, params });
+        if (sql.includes('FROM access.email_verification_tokens')) {
+          return { rowCount: 1, rows: [{ id: 'verification-1', user_id: 'user-1' }] };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const service = createUserImplementation({
+      db: {
+        async connect() {
+          return client;
+        },
+      },
+    });
+
+    const { error, response } = await invoke(service.VerifyEmail, { token: 'verification-secret' });
+
+    expect(error).toBeNull();
+    expect(response).toEqual({ user_id: 'user-1', verified: true });
+    const lookup = statements.find(({ sql }) =>
+      sql.includes('FROM access.email_verification_tokens'),
+    );
+    expect(lookup.sql).toContain('used_at IS NULL');
+    expect(lookup.sql).toContain('expires_at > now()');
+    expect(lookup.params[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(lookup.params[0]).not.toBe('verification-secret');
+    expect(statements.some(({ sql }) => sql.includes('SET used_at = now()'))).toBe(true);
+    expect(statements.some(({ sql }) => sql.includes('SET email_verified_at'))).toBe(true);
+    expect(statements.some(({ sql }) => sql === 'COMMIT')).toBe(true);
+  });
+
+  it('rejects an expired, used, or unknown verification token', async () => {
+    let rolledBack = false;
+    const service = createUserImplementation({
+      db: {
+        async connect() {
+          return {
+            async query(sql) {
+              if (sql === 'ROLLBACK') rolledBack = true;
+              if (sql.includes('FROM access.email_verification_tokens')) {
+                return { rowCount: 0, rows: [] };
+              }
+              return { rowCount: 1, rows: [] };
+            },
+            release() {},
+          };
+        },
+      },
+    });
+
+    const { error, response } = await invoke(service.VerifyEmail, { token: 'invalid-token' });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('invalid_token');
+    expect(response).toBeUndefined();
+    expect(rolledBack).toBe(true);
   });
 });
 

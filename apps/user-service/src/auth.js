@@ -262,6 +262,10 @@ function resetLink(publicAppUrl, token) {
   return `${publicAppUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
 }
 
+function emailVerificationLink(publicAppUrl, token) {
+  return `${publicAppUrl.replace(/\/$/, '')}/login?verify=${encodeURIComponent(token)}`;
+}
+
 async function queueAuthEmail(
   queryable,
   { userId, invitationId, email, templateCode, variables, locale = 'ru-RU', expiresAt },
@@ -478,7 +482,7 @@ export function createUserImplementation({
             email,
             templateCode: 'email_verification',
             variables: {
-              link: `${publicAppUrl.replace(/\/$/, '')}/?verify=${encodeURIComponent(token)}`,
+              link: emailVerificationLink(publicAppUrl, token),
             },
             locale,
             expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_MS),
@@ -878,7 +882,7 @@ export function createUserImplementation({
             email,
             templateCode: 'email_verification',
             variables: {
-              link: `${publicAppUrl.replace(/\/$/, '')}/?verify=${encodeURIComponent(token)}`,
+              link: emailVerificationLink(publicAppUrl, token),
             },
             locale: user.locale ?? 'ru-RU',
             expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_MS),

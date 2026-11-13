@@ -71,6 +71,26 @@ describe('api-gateway auth routes', () => {
     });
   });
 
+  it('forwards the email-verification token', async () => {
+    let received;
+    const app = build({
+      VerifyEmail(request, callback) {
+        received = request;
+        callback(null, { user_id: 'user-1', verified: true });
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/verify',
+      payload: { token: 'verify-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ userId: 'user-1', verified: true });
+    expect(received).toEqual({ token: 'verify-token' });
+  });
+
   it('returns the account email for a valid password-reset token', async () => {
     let received;
     const app = build({
