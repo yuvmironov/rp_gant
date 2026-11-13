@@ -12,7 +12,7 @@
     "@grpc/grpc-js": "^1.14.6",
     "@rp-gant/service-kit": "workspace:*",
     "kafkajs": "2.2.4",
-    "nodemailer": "10.0.6",
+    "nodemailer": "10.1.4",
     "pg": "^8.23.1"
   }
 }
