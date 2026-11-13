@@ -4501,14 +4501,6 @@
           "working"
         ]
       },
-      "AssignmentRole": {
-        "type": "string",
-        "enum": [
-          "responsible",
-          "executor",
-          "co_executor"
-        ]
-      },
       "AssigneeType": {
         "type": "string",
         "enum": [
@@ -6509,8 +6501,7 @@
           "assigneeType": {
             "type": "string",
             "enum": [
-              "user",
-              "executor"
+              "user"
             ]
           },
           "assigneeId": {
@@ -6524,6 +6515,14 @@
             "type": "boolean"
           }
         }
+      },
+      "AssignmentRole": {
+        "type": "string",
+        "enum": [
+          "responsible",
+          "executor",
+          "co_executor"
+        ]
       }
     }
   }
