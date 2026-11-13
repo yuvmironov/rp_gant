@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/grpc-js": "^1.14.7",
     "@rp-gant/service-kit": "workspace:*",
     "kafkajs": "2.2.4",
     "pg": "^8.23.1"
