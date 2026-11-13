@@ -8,4 +8,6 @@
 
 Миграции `project_diagram/0009_user_only_task_assignments.sql` и `user_access/0005_remove_executor_catalog.sql` forward-only. Сначала project migration проверяет, что в `plan.assignments` не осталось строк с `assignee_type='executor'`, и заменяет constraint на user-only. Только после её успеха удаляются `access.executor_projects` и `access.executors`. Локальный bootstrap соблюдает этот порядок.
 
+REST-каталог исполнителей удалён. Существующие gRPC executor-типы и RPC-сигнатуры оставлены в proto как deprecated для wire-совместимости; сервис их не реализует и отвечает `UNIMPLEMENTED`.
+
 Если guard обнаруживает legacy assignments, миграция намеренно останавливается без изменения схемы. Подготовьте и проверьте отдельный план преобразования/удаления затронутых назначений на staging; не отключайте guard и не запускайте последующую user migration отдельно. Перед production rollout необходимы staging acceptance, backup и отдельное согласование deployment.
