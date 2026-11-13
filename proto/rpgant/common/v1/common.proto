@@ -64,7 +64,7 @@ enum AssignmentRole {
 enum AssigneeType {
   ASSIGNEE_TYPE_UNSPECIFIED = 0;
   ASSIGNEE_TYPE_USER = 1;
-  ASSIGNEE_TYPE_EXECUTOR = 2;
+  ASSIGNEE_TYPE_EXECUTOR = 2 [deprecated = true];
 }
 
 enum DependencyLinkType {
@@ -185,10 +185,11 @@ message UserRef {
 }
 
 message ExecutorRef {
+  option deprecated = true;
   string executor_id = 1;
   string full_name = 2;
   string position = 3;
-  string linked_user_id = 4;
+  string linked_user_id = 4 [deprecated = true];
   bool resolved = 5;
 }
 

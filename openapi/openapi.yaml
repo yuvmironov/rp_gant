@@ -16,8 +16,6 @@ tags:
     description: Пользователи и профили
   - name: Access
     description: Роли, права и участники проектов
-  - name: Executors
-    description: Каталог исполнителей
   - name: Projects
     description: Проекты и их жизненный цикл
   - name: Diagrams
@@ -492,167 +490,6 @@ paths:
                       $ref: '#/components/schemas/Permission'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /executors:
-    get:
-      tags:
-        - Executors
-      operationId: listExecutors
-      summary: Каталог исполнителей
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-        - name: query
-          in: query
-          schema:
-            type: string
-        - name: includeInactive
-          in: query
-          schema:
-            type: boolean
-            default: false
-        - name: projectId
-          in: query
-          description: Ограничить каталог исполнителями, доступными в проекте
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: Исполнители
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - items
-                  - page
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Executor'
-                  page:
-                    $ref: '#/components/schemas/PageMeta'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-    post:
-      tags:
-        - Executors
-      operationId: createExecutor
-      summary: Создать исполнителя
-      parameters:
-        - $ref: '#/components/parameters/CsrfToken'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - lastName
-                - firstName
-                - projectIds
-              properties:
-                lastName:
-                  type: string
-                  maxLength: 100
-                firstName:
-                  type: string
-                  maxLength: 100
-                middleName:
-                  type: string
-                  maxLength: 100
-                position:
-                  type: string
-                  maxLength: 200
-                projectIds:
-                  type: array
-                  minItems: 1
-                  uniqueItems: true
-                  items:
-                    type: string
-                    format: uuid
-      responses:
-        '201':
-          description: Создан
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Executor'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
-  /executors/{executorId}:
-    patch:
-      tags:
-        - Executors
-      operationId: updateExecutor
-      summary: Изменить исполнителя
-      parameters:
-        - $ref: '#/components/parameters/ExecutorId'
-        - $ref: '#/components/parameters/CsrfToken'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - projectIds
-              properties:
-                lastName:
-                  type: string
-                  maxLength: 100
-                firstName:
-                  type: string
-                  maxLength: 100
-                middleName:
-                  type: string
-                  maxLength: 100
-                position:
-                  type: string
-                  maxLength: 200
-                projectIds:
-                  type: array
-                  minItems: 1
-                  uniqueItems: true
-                  items:
-                    type: string
-                    format: uuid
-      responses:
-        '200':
-          description: Изменен
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Executor'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags:
-        - Executors
-      operationId: deleteExecutor
-      summary: Удалить исполнителя
-      parameters:
-        - $ref: '#/components/parameters/ExecutorId'
-        - $ref: '#/components/parameters/CsrfToken'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '204':
-          description: Удален
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
   /projects:
     get:
       tags:
@@ -2702,13 +2539,6 @@ components:
       schema:
         type: string
         format: uuid
-    ExecutorId:
-      name: executorId
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
     ProjectId:
       name: projectId
       in: path
@@ -2893,7 +2723,6 @@ components:
       type: string
       enum:
         - user
-        - executor
     ImportFormat:
       type: string
       enum:
@@ -3062,314 +2891,6 @@ components:
           type: string
         description:
           type: string
-    Executor:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        lastName:
-          type: string
-          maxLength: 100
-        firstName:
-          type: string
-          maxLength: 100
-        middleName:
-          type: string
-          maxLength: 100
-        fullName:
-          type: string
-        position:
-          type: string
-        projectIds:
-          type: array
-          items:
-            type: string
-            format: uuid
-        isActive:
-          type: boolean
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      required:
-        - lastName
-        - firstName
-        - projectIds
-    ProjectMembership:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        projectId:
-          type: string
-          format: uuid
-        userId:
-          type: string
-          format: uuid
-        role:
-          $ref: '#/components/schemas/ProjectRole'
-        status:
-          type: string
-        invitedAt:
-          type: string
-          format: date-time
-        joinedAt:
-          type: string
-          format: date-time
-        revokedAt:
-          type: string
-          format: date-time
-        revokedReason:
-          type: string
-        user:
-          $ref: '#/components/schemas/UserSummary'
-    Invitation:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        projectId:
-          type: string
-          format: uuid
-        email:
-          type: string
-          format: email
-        role:
-          $ref: '#/components/schemas/ProjectRole'
-        status:
-          type: string
-        expiresAt:
-          type: string
-          format: date-time
-        acceptedAt:
-          type: string
-          format: date-time
-        revokedAt:
-          type: string
-          format: date-time
-    Project:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        description:
-          type: string
-        ownerUserId:
-          type: string
-          format: uuid
-        owner:
-          $ref: '#/components/schemas/UserRef'
-        status:
-          $ref: '#/components/schemas/ProjectStatus'
-        myRole:
-          $ref: '#/components/schemas/ProjectRole'
-        settings:
-          type: object
-          additionalProperties: true
-        createdByUserId:
-          type: string
-          format: uuid
-        updatedByUserId:
-          type: string
-          format: uuid
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-        archivedAt:
-          type: string
-          format: date-time
-        deletedAt:
-          type: string
-          format: date-time
-        purgeAfter:
-          type: string
-          format: date-time
-        namesResolved:
-          type: boolean
-        diagramsCount:
-          type: integer
-          minimum: 0
-    Diagram:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        projectId:
-          type: string
-          format: uuid
-        name:
-          type: string
-        description:
-          type: string
-        dayMode:
-          $ref: '#/components/schemas/DayMode'
-        currentRevision:
-          type: integer
-          format: int64
-        createdByUserId:
-          type: string
-          format: uuid
-        updatedByUserId:
-          type: string
-          format: uuid
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-        archivedAt:
-          type: string
-          format: date-time
-        deletedAt:
-          type: string
-          format: date-time
-    Assignment:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        role:
-          type: string
-          enum:
-            - responsible
-        assigneeType:
-          type: string
-          enum:
-            - user
-        assigneeId:
-          type: string
-          format: uuid
-        displayName:
-          type: string
-        linkedUserId:
-          type: string
-          format: uuid
-        resolved:
-          type: boolean
-    TaskAssignment:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        role:
-          type: string
-          enum:
-            - executor
-            - co_executor
-        assigneeType:
-          type: string
-          enum:
-            - user
-            - executor
-        assigneeId:
-          type: string
-          format: uuid
-        displayName:
-          type: string
-        linkedUserId:
-          type: string
-          format: uuid
-        resolved:
-          type: boolean
-    DirectionResponsibleInput:
-      type: object
-      required:
-        - assigneeType
-        - assigneeId
-      properties:
-        assigneeType:
-          type: string
-          enum:
-            - user
-        assigneeId:
-          type: string
-          format: uuid
-    TaskAssignmentInput:
-      type: object
-      required:
-        - role
-        - assigneeType
-        - assigneeId
-      properties:
-        role:
-          type: string
-          enum:
-            - executor
-            - co_executor
-        assigneeType:
-          type: string
-          enum:
-            - user
-        assigneeId:
-          type: string
-          format: uuid
-    Direction:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        diagramId:
-          type: string
-          format: uuid
-        wbsCode:
-          type: string
-        sortOrder:
-          type: integer
-        name:
-          type: string
-        description:
-          type: string
-        result:
-          type: string
-        priority:
-          $ref: '#/components/schemas/Priority'
-        startDate:
-          type: string
-          format: date-time
-        endDate:
-          type: string
-          format: date-time
-        jiraNumber:
-          type: string
-        bpFlag:
-          type: boolean
-        spFlag:
-          type: boolean
-        version:
-          type: integer
-        assignments:
-          type: array
-          maxItems: 1
-          items:
-            $ref: '#/components/schemas/Assignment'
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-        createdByUserId:
-          type: string
-          format: uuid
-        updatedByUserId:
-          type: string
-          format: uuid
     Task:
       type: object
       properties:
@@ -4349,3 +3870,268 @@ components:
           items:
             type: string
             format: uuid
+    ProjectMembership:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/ProjectRole'
+        status:
+          type: string
+        invitedAt:
+          type: string
+          format: date-time
+        joinedAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+        revokedReason:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserSummary'
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/ProjectRole'
+        status:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        ownerUserId:
+          type: string
+          format: uuid
+        owner:
+          $ref: '#/components/schemas/UserRef'
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        myRole:
+          $ref: '#/components/schemas/ProjectRole'
+        settings:
+          type: object
+          additionalProperties: true
+        createdByUserId:
+          type: string
+          format: uuid
+        updatedByUserId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        archivedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+        purgeAfter:
+          type: string
+          format: date-time
+        namesResolved:
+          type: boolean
+        diagramsCount:
+          type: integer
+          minimum: 0
+    Diagram:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        dayMode:
+          $ref: '#/components/schemas/DayMode'
+        currentRevision:
+          type: integer
+          format: int64
+        createdByUserId:
+          type: string
+          format: uuid
+        updatedByUserId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        archivedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+    Assignment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+            - responsible
+        assigneeType:
+          type: string
+          enum:
+            - user
+        assigneeId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        resolved:
+          type: boolean
+    TaskAssignment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+            - executor
+            - co_executor
+        assigneeType:
+          type: string
+          enum:
+            - user
+        assigneeId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        resolved:
+          type: boolean
+    DirectionResponsibleInput:
+      type: object
+      required:
+        - assigneeType
+        - assigneeId
+      properties:
+        assigneeType:
+          type: string
+          enum:
+            - user
+        assigneeId:
+          type: string
+          format: uuid
+    TaskAssignmentInput:
+      type: object
+      required:
+        - role
+        - assigneeType
+        - assigneeId
+      properties:
+        role:
+          type: string
+          enum:
+            - executor
+            - co_executor
+        assigneeType:
+          type: string
+          enum:
+            - user
+        assigneeId:
+          type: string
+          format: uuid
+    Direction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        diagramId:
+          type: string
+          format: uuid
+        wbsCode:
+          type: string
+        sortOrder:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        result:
+          type: string
+        priority:
+          $ref: '#/components/schemas/Priority'
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        jiraNumber:
+          type: string
+        bpFlag:
+          type: boolean
+        spFlag:
+          type: boolean
+        version:
+          type: integer
+        assignments:
+          type: array
+          maxItems: 1
+          items:
+            $ref: '#/components/schemas/Assignment'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdByUserId:
+          type: string
+          format: uuid
+        updatedByUserId:
+          type: string
+          format: uuid

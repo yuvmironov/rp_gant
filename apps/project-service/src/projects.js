@@ -269,12 +269,7 @@ function fromAssignmentRole(value) {
 }
 
 function fromAssigneeType(value) {
-  return (
-    {
-      ASSIGNEE_TYPE_USER: 'user',
-      ASSIGNEE_TYPE_EXECUTOR: 'executor',
-    }[value] ?? ''
-  );
+  return value === 'ASSIGNEE_TYPE_USER' ? 'user' : '';
 }
 
 function fromTaskStatus(value) {
@@ -327,54 +322,24 @@ function toAssignment(row, refs) {
         executor: 'ASSIGNMENT_ROLE_EXECUTOR',
         co_executor: 'ASSIGNMENT_ROLE_CO_EXECUTOR',
       }[row.role] ?? 'ASSIGNMENT_ROLE_UNSPECIFIED',
-    assignee_type:
-      row.assignee_type === 'executor' ? 'ASSIGNEE_TYPE_EXECUTOR' : 'ASSIGNEE_TYPE_USER',
+    assignee_type: 'ASSIGNEE_TYPE_USER',
     assignee_id: row.assignee_id,
     display_name: ref?.display_name ?? '',
-    linked_user_id: ref?.linked_user_id ?? '',
     resolved: Boolean(ref),
   };
 }
 
 async function resolveAssignments(rows, userClient) {
   const userIds = [
-    ...new Set(rows.filter((row) => row.assignee_type === 'user').map((row) => row.assignee_id)),
-  ];
-  const executorIds = [
     ...new Set(
-      rows.filter((row) => row.assignee_type === 'executor').map((row) => row.assignee_id),
+      (rows ?? []).filter((row) => row.assignee_type === 'user').map((row) => row.assignee_id),
     ),
   ];
-  const refs = new Map();
-  if (userIds.length > 0) {
-    try {
-      const users = await call(userClient, 'GetUsersByIds', { user_ids: userIds });
-      for (const user of users.items) {
-        refs.set(`user:${user.id}`, {
-          display_name: user.display_name,
-          linked_user_id: user.id,
-        });
-      }
-    } catch {
-      // Keep unresolved refs when User Service is unavailable.
-    }
-  }
-  if (executorIds.length > 0) {
-    try {
-      const executors = await call(userClient, 'GetExecutorsByIds', {
-        executor_ids: executorIds,
-      });
-      for (const executor of executors.items) {
-        refs.set(`executor:${executor.id}`, {
-          display_name: executor.full_name,
-          linked_user_id: executor.linked_user_id ?? '',
-        });
-      }
-    } catch {
-      // Keep unresolved refs when User Service is unavailable.
-    }
-  }
-  return rows.map((row) => toAssignment(row, refs));
+  const response = userIds.length
+    ? await call(userClient, 'GetUsersByIds', { user_ids: userIds })
+    : { items: [] };
+  const refs = new Map((response.items ?? []).map((user) => [`user:${user.id}`, user]));
+  return (rows ?? []).map((row) => toAssignment(row, refs));
 }
 
 async function loadAssignments(db, userClient, entityType, entityId) {
@@ -583,7 +548,7 @@ function booleanValue(value) {
 export function standaloneCsvToPayload(
   text,
   report,
-  executorMap = new Map(),
+  memberNameMap = new Map(),
   activeProjectMemberIds = new Set(),
 ) {
   const { headers, rows, meta } = parseDelimited(text);
@@ -646,7 +611,7 @@ export function standaloneCsvToPayload(
   const payload = normalizeStandaloneImport(
     { project: meta.project, tasks, workdays: { mode: 'calendar', holidays: [] } },
     report,
-    executorMap,
+    memberNameMap,
     activeProjectMemberIds,
   );
   return payload;
@@ -655,7 +620,7 @@ export function standaloneCsvToPayload(
 export function normalizeStandaloneImport(
   payload,
   report,
-  executorMap = new Map(),
+  memberNameMap = new Map(),
   activeProjectMemberIds = new Set(),
 ) {
   const statusMap = {
@@ -676,19 +641,17 @@ export function normalizeStandaloneImport(
   const localExecutorNames = new Map(
     (payload.executors ?? []).map((executor) => [String(executor.id), String(executor.name ?? '')]),
   );
-  const resolveExecutor = (localId) => {
+  const resolveMember = (localId) => {
     const id = String(localId ?? '');
     if (!id) return null;
-    if (isUuid(id)) {
-      return executorMap.get(`id:${id}`) ?? (activeProjectMemberIds.has(id) ? id : null);
-    }
+    if (isUuid(id)) return activeProjectMemberIds.has(id) ? id : null;
     const name = localExecutorNames.get(id) ?? id;
-    return executorMap.get(String(name).trim().toLowerCase()) ?? null;
+    return memberNameMap.get(String(name).trim().toLowerCase()) ?? null;
   };
   const assignmentsFor = (item, roles, ownerLabel) => {
     const assignments = [];
     for (const [field, role] of roles) {
-      const resolved = resolveExecutor(item[field]);
+      const resolved = resolveMember(item[field]);
       if (item[field] && !resolved) {
         report.issues.push(`${ownerLabel}_not_mapped:${item.id}:${item[field]}`);
       }
@@ -821,8 +784,7 @@ async function processDiagramImport(
     format: inputFormat,
     data,
     actorId,
-    executorMap = new Map(),
-    executorUserMap = new Map(),
+    memberNameMap = new Map(),
     activeProjectMemberIds = new Set(),
     dryRun = false,
   },
@@ -918,7 +880,7 @@ async function processDiagramImport(
         const converted = standaloneCsvToPayload(
           csvText,
           report,
-          executorMap,
+          memberNameMap,
           activeProjectMemberIds,
         );
         await client.query(
@@ -980,7 +942,7 @@ async function processDiagramImport(
     } else {
       let payload = JSON.parse(Buffer.from(data).toString('utf8'));
       if (payload && !payload.formatVersion && Array.isArray(payload.tasks)) {
-        payload = normalizeStandaloneImport(payload, report, executorMap, activeProjectMemberIds);
+        payload = normalizeStandaloneImport(payload, report, memberNameMap, activeProjectMemberIds);
         await client.query(
           `UPDATE project.diagrams
            SET name = COALESCE(NULLIF($2, ''), name),
@@ -1084,48 +1046,14 @@ async function processDiagramImport(
         }
         const validRoles =
           item.entityType === 'direction' ? ['responsible'] : ['executor', 'co_executor'];
-        if (
-          !validRoles.includes(role) ||
-          !['user', 'executor'].includes(assigneeType) ||
-          !isUuid(assigneeId)
-        ) {
+        if (!validRoles.includes(role)) continue;
+        if (assigneeType !== 'user') {
+          report.issues.push(`assignee_not_active_project_member:${assigneeId}`);
           continue;
         }
-        if (item.entityType === 'direction' && assigneeType === 'executor') {
-          const linkedUserId = executorUserMap.get(assigneeId);
-          if (!linkedUserId || !activeProjectMemberIds.has(linkedUserId)) {
-            report.issues.push(`direction_responsible_not_active_project_member:${assigneeId}`);
-            continue;
-          }
-          assigneeType = 'user';
-          assigneeId = linkedUserId;
-        } else if (
-          item.entityType === 'task' &&
-          role !== 'executor' &&
-          assigneeType === 'executor'
-        ) {
-          const linkedUserId = executorUserMap.get(assigneeId);
-          if (linkedUserId) {
-            assigneeType = 'user';
-            assigneeId = linkedUserId;
-          } else {
-            report.issues.push(`executor_assignment_preserved_as_legacy:${assigneeId}`);
-          }
-        } else if (
-          item.entityType === 'task' &&
-          role === 'executor' &&
-          assigneeType === 'executor' &&
-          normalizeRole(item.assignment.role) === 'responsible'
-        ) {
-          report.issues.push(`task_catalog_responsible_preserved_as_legacy_executor:${assigneeId}`);
-        } else if (assigneeType === 'executor') {
-          const linkedUserId = executorUserMap.get(assigneeId);
-          if (linkedUserId) {
-            assigneeType = 'user';
-            assigneeId = linkedUserId;
-          } else {
-            report.issues.push(`executor_assignment_preserved_as_legacy:${assigneeId}`);
-          }
+        if (!isUuid(assigneeId)) {
+          report.issues.push(`assignee_not_active_project_member:${assigneeId}`);
+          continue;
         }
         if (assigneeType === 'user' && !activeProjectMemberIds.has(assigneeId)) {
           report.issues.push(`assignee_not_active_project_member:${assigneeId}`);
@@ -1542,7 +1470,6 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.FAILED_PRECONDITION, 'project_not_archived'));
           return;
         }
-        await call(userClient, 'RemoveExecutorProjectLinks', { project_id: projectId });
         callback(null, { project: toProject(result.rows[0], role) });
       } catch (error) {
         callback(mapDbError(error));
@@ -2599,8 +2526,7 @@ export function createProjectImplementation({ db, userClient }) {
         await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.import');
         const actor = actorUserId(call_);
         const projectId = diagram.rows[0].project_id;
-        const executorMap = new Map();
-        const executorUserMap = new Map();
+        const memberNameMap = new Map();
         const activeProjectMemberIds = new Set();
         const memberNameCandidates = new Map();
         let memberOffset = 0;
@@ -2634,30 +2560,7 @@ export function createProjectImplementation({ db, userClient }) {
           if (!items.length) break;
         }
         for (const [displayName, candidates] of memberNameCandidates) {
-          if (candidates.size === 1) executorMap.set(displayName, [...candidates][0]);
-        }
-        let executorOffset = 0;
-        let executorTotal = Infinity;
-        while (executorOffset < executorTotal) {
-          const response = await call(userClient, 'ListExecutors', {
-            project_id: projectId,
-            include_inactive: true,
-            page: { limit: 200, offset: executorOffset },
-          });
-          const items = response.items ?? [];
-          for (const executor of items) {
-            const linkedUserId = String(executor.linked_user_id ?? '');
-            if (!linkedUserId || !activeProjectMemberIds.has(linkedUserId)) continue;
-            executorUserMap.set(executor.id, linkedUserId);
-            executorMap.set(`id:${executor.id}`, linkedUserId);
-            const fullName = String(executor.full_name ?? '')
-              .trim()
-              .toLowerCase();
-            if (fullName) executorMap.set(fullName, linkedUserId);
-          }
-          executorTotal = Number(response.page?.total ?? items.length);
-          executorOffset += items.length;
-          if (!items.length) break;
+          if (candidates.size === 1) memberNameMap.set(displayName, [...candidates][0]);
         }
         const created = await db.query(
           `INSERT INTO jobs.import_jobs
@@ -2690,8 +2593,7 @@ export function createProjectImplementation({ db, userClient }) {
             format,
             data,
             actorId: actor,
-            executorMap,
-            executorUserMap,
+            memberNameMap,
             activeProjectMemberIds,
             dryRun: preview,
           });
@@ -3008,7 +2910,6 @@ export function createProjectImplementation({ db, userClient }) {
                 mode: diagram.day_mode,
                 holidays: holidayItems,
               },
-              executors: [],
               directions: directionItems,
               tasks: taskItems,
               dependencies: dependencyItems,
@@ -3525,26 +3426,6 @@ export function createProjectImplementation({ db, userClient }) {
           diagram.rows[0].project_id,
           'project.task.edit',
         );
-        const currentAssignments = await db.query(
-          `SELECT role, assignee_type, assignee_id
-           FROM plan.assignments
-           WHERE entity_type = 'task' AND entity_id = $1`,
-          [taskId],
-        );
-        const currentKeys = new Set(
-          currentAssignments.rows.map(
-            (item) => `${item.role}:${item.assignee_type}:${item.assignee_id}`,
-          ),
-        );
-        const newLegacyAssignments = assignments.filter(
-          (item) =>
-            item.assigneeType === 'executor' &&
-            !currentKeys.has(`${item.role}:executor:${item.assigneeId}`),
-        );
-        if (newLegacyAssignments.length) {
-          callback(grpcError(status.INVALID_ARGUMENT, 'executor_assignment_not_supported'));
-          return;
-        }
         const newProjectUserIds = assignments
           .filter((item) => item.assigneeType === 'user')
           .map((item) => item.assigneeId);

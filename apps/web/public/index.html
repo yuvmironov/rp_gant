@@ -58,7 +58,6 @@
             >Уведомления <span id="unread-count">0</span></a
           >
           <button id="audit-toggle" class="ghost hidden" type="button">Аудит</button>
-          <button id="executors-toggle" class="ghost hidden" type="button">Исполнители</button>
           <button id="admin-toggle" class="ghost hidden" type="button">Админ</button>
           <button id="settings-toggle" class="ghost hidden" type="button">Настройки</button>
           <a id="profile-toggle" class="ghost" href="/profile">Профиль</a>
@@ -294,16 +293,8 @@
                 <option value="responsible">Ответственный</option>
                 <option value="executor">Исполнитель</option>
                 <option value="co_executor">Соисполнитель</option>
-              </select>
-            </label>
-            <label
-              >Тип
-              <select id="assignment-type">
-                <option value="user">Пользователь</option>
-                <option value="executor">Исполнитель</option>
-              </select>
-            </label>
-            <label
+              </select> </label
+            ><label
               >Кто
               <select id="assignment-person"></select>
             </label>
@@ -385,24 +376,6 @@
           </label>
           <button class="primary" type="submit">Сбросить пароль</button>
         </form>
-      </div>
-    </div>
-
-    <div id="executors-modal" class="modal hidden" role="dialog" aria-modal="true">
-      <div class="modal-card">
-        <div class="panel-head">
-          <h2>Исполнители</h2>
-          <button id="executors-close" class="ghost" type="button">Закрыть</button>
-        </div>
-        <form id="executor-form" class="form compact">
-          <input type="hidden" name="executorId" />
-          <label>Фамилия <input name="lastName" required /></label>
-          <label>Имя <input name="firstName" required /></label>
-          <label>Отчество <input name="middleName" /></label>
-          <label>Должность <input name="position" /></label>
-          <button class="primary" type="submit">Сохранить</button>
-        </form>
-        <div id="executor-list" class="list"></div>
       </div>
     </div>
 

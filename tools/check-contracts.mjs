@@ -52,8 +52,8 @@ const missingMapping = operationIds.filter(
 );
 const staleMapping = mappedOperationIds.filter((operationId) => !operationIdSet.has(operationId));
 
-check(paths.length === 76, `OpenAPI paths: expected 76, got ${paths.length}`);
-check(operations === 98, `OpenAPI operations: expected 98, got ${operations}`);
+check(paths.length === 74, `OpenAPI paths: expected 74, got ${paths.length}`);
+check(operations === 94, `OpenAPI operations: expected 94, got ${operations}`);
 check(operationIds.length === operations, 'Every OpenAPI operation must have an operationId');
 check(
   operationIdSet.size === operationIds.length,
@@ -80,7 +80,7 @@ check(
   staleMapping.length === 0,
   `REST/gRPC mapping has unknown operations: ${staleMapping.join(', ')}`,
 );
-check(Object.keys(openapi.components?.schemas ?? {}).length === 76, 'OpenAPI schemas: expected 76');
+check(Object.keys(openapi.components?.schemas ?? {}).length === 75, 'OpenAPI schemas: expected 75');
 const taskAssignmentInput =
   openapi.paths?.['/tasks/{taskId}/assignments']?.put?.requestBody?.content?.['application/json']
     ?.schema?.properties?.assignments;
@@ -137,14 +137,14 @@ check(
 );
 
 const eventTypes = readJson('events/event-types.json');
-check(eventTypes.events?.length === 68, 'Event types: expected 68');
+check(eventTypes.events?.length === 63, 'Event types: expected 63');
 check(
   eventTypes.events?.every((event) => ['implemented', 'planned'].includes(event.status)),
   'Every event must have implemented/planned status',
 );
 
 const payloads = readJson('events/schemas/payloads.schema.json');
-check(Object.keys(payloads.$defs ?? {}).length === 79, 'Event payload definitions: expected 79');
+check(Object.keys(payloads.$defs ?? {}).length === 74, 'Event payload definitions: expected 74');
 
 const protoFiles = readdirSync(join(root, 'proto'), { recursive: true }).filter((file) =>
   String(file).endsWith('.proto'),
@@ -161,8 +161,10 @@ check(
 );
 const dbInit = readFileSync(join(root, 'infrastructure/local/db-init.sh'), 'utf8');
 check(
-  dbInit.includes('0008_assignment_roles_by_entity.sql'),
-  'The project assignment constraint migration must be applied during DB bootstrap',
+  dbInit.includes('0008_assignment_roles_by_entity.sql') &&
+    dbInit.indexOf('0009_user_only_task_assignments.sql') <
+      dbInit.indexOf('0005_remove_executor_catalog.sql'),
+  'The guarded user-only assignment migration must run before dropping the user catalog',
 );
 
 check(existsSync(join(root, 'openapi/openapi.yaml')), 'openapi.yaml is missing');

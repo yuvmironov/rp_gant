@@ -8,7 +8,6 @@ const state = {
   task: null,
   comments: [],
   users: null,
-  executors: null,
   sessions: [],
   filters: { query: '', status: '' },
 };
@@ -86,24 +85,11 @@ function setTableMessage(message) {
 }
 
 async function loadDirectory() {
-  if (state.users && state.executors) return;
-  const [users, executors] = await Promise.allSettled([
-    api('/users?limit=200'),
-    api('/executors?limit=200'),
-  ]);
-  state.users = users.status === 'fulfilled' ? (users.value.items ?? []) : [];
-  state.executors = executors.status === 'fulfilled' ? (executors.value.items ?? []) : [];
+  if (state.users) return;
+  const response = await api('/users?limit=200');
+  state.users = response.items ?? [];
   if (state.users.length === 0 && state.user) {
-    state.users = [
-      {
-        id: state.user.id,
-        displayName: state.user.displayName,
-        email: state.user.email,
-      },
-    ];
-  }
-  if (users.status === 'rejected' && executors.status === 'rejected') {
-    throw users.reason;
+    state.users = [{ id: state.user.id, displayName: state.user.displayName, email: state.user.email }];
   }
 }
 
@@ -614,7 +600,7 @@ function renderAssignments() {
       (assignment) => `
         <div class="list-item assignment-item">
           <span class="item-title">${escapeHtml(assignment.displayName || assignment.assigneeId)}</span>
-          <span class="item-meta">${escapeHtml(assignmentRoleLabel(assignment.role))} · ${escapeHtml(assignment.assigneeType === 'executor' ? 'Исполнитель' : 'Пользователь')}</span>
+          <span class="item-meta">${escapeHtml(assignmentRoleLabel(assignment.role))} · ${escapeHtml('Пользователь')}</span>
           <button class="ghost small" data-assignment-remove="${escapeHtml(assignment.id)}" type="button">Убрать</button>
         </div>`,
     )
@@ -622,9 +608,8 @@ function renderAssignments() {
 }
 
 function renderAssignmentPeople() {
-  const type = $('#assignment-type').value;
   const select = $('#assignment-person');
-  const items = type === 'executor' ? (state.executors ?? []) : (state.users ?? []);
+  const items = state.users ?? [];
   select.innerHTML = items
     .map(
       (item) =>
@@ -633,12 +618,10 @@ function renderAssignmentPeople() {
     .join('');
 }
 
-$('#assignment-type').addEventListener('change', renderAssignmentPeople);
-
 $('#assignment-add').addEventListener('click', async () => {
   if (!state.task) return;
   const role = $('#assignment-role').value;
-  const assigneeType = $('#assignment-type').value;
+  const assigneeType = 'user';
   const assigneeId = $('#assignment-person').value;
   if (!assigneeId) {
     showToast('Нет доступных исполнителей');

@@ -11,9 +11,20 @@ afterEach(async () => {
 describe('user-service gRPC contract', () => {
   it('loads all UserService methods from proto', () => {
     const service = loadUserService();
-    expect(Object.keys(service.service)).toHaveLength(55);
-    expect(service.service).toHaveProperty('LinkExecutorUser');
-    expect(service.service).toHaveProperty('UnlinkExecutorUser');
+    const methodNames = Object.keys(service.service);
+    expect(methodNames).toHaveLength(55);
+    expect(methodNames).toEqual(
+      expect.arrayContaining([
+        'RemoveExecutorProjectLinks',
+        'ListExecutors',
+        'GetExecutorsByIds',
+        'CreateExecutor',
+        'UpdateExecutor',
+        'DeleteExecutor',
+        'LinkExecutorUser',
+        'UnlinkExecutorUser',
+      ]),
+    );
   });
 
   it('starts a gRPC server and returns UNIMPLEMENTED for stubs', async () => {
@@ -23,15 +34,11 @@ describe('user-service gRPC contract', () => {
     const client = new server.service(`127.0.0.1:${server.port}`, credentials.createInsecure());
 
     const error = await new Promise((resolve) => {
-      client.GetRoles({}, (grpcError) => resolve(grpcError));
+      client.ListExecutors({}, (grpcError) => resolve(grpcError));
     });
 
     expect(error.code).toBe(12);
 
-    const legacyError = await new Promise((resolve) => {
-      client.LinkExecutorUser({}, (grpcError) => resolve(grpcError));
-    });
-    expect(legacyError.code).toBe(12);
     client.close();
   });
 

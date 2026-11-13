@@ -251,51 +251,6 @@
       "status": "implemented"
     },
     {
-      "type": "executor.created",
-      "producer": "user",
-      "consumers": [
-        "audit"
-      ],
-      "payloadSchema": "payloads.schema.json#/$defs/ExecutorCreatedPayload",
-      "status": "implemented"
-    },
-    {
-      "type": "executor.updated",
-      "producer": "user",
-      "consumers": [
-        "audit"
-      ],
-      "payloadSchema": "payloads.schema.json#/$defs/ExecutorUpdatedPayload",
-      "status": "implemented"
-    },
-    {
-      "type": "executor.deleted",
-      "producer": "user",
-      "consumers": [
-        "audit"
-      ],
-      "payloadSchema": "payloads.schema.json#/$defs/ExecutorDeletedPayload",
-      "status": "implemented"
-    },
-    {
-      "type": "executor.linked",
-      "producer": "user",
-      "consumers": [
-        "audit"
-      ],
-      "payloadSchema": "payloads.schema.json#/$defs/ExecutorLinkedPayload",
-      "status": "implemented"
-    },
-    {
-      "type": "executor.unlinked",
-      "producer": "user",
-      "consumers": [
-        "audit"
-      ],
-      "payloadSchema": "payloads.schema.json#/$defs/ExecutorUnlinkedPayload",
-      "status": "implemented"
-    },
-    {
       "type": "diagram.created",
       "producer": "project",
       "consumers": [

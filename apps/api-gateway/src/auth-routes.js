@@ -85,19 +85,6 @@ export function mapUserSummary(user) {
   };
 }
 
-export function mapExecutor(executor) {
-  return {
-    id: executor.id,
-    lastName: executor.last_name,
-    firstName: executor.first_name,
-    middleName: executor.middle_name,
-    fullName: executor.full_name,
-    position: executor.position,
-    projectIds: executor.project_ids ?? [],
-    isActive: executor.is_active,
-  };
-}
-
 export function sendProblem(reply, request, error) {
   const grpcCode = error.code ?? 13;
   const status = GRPC_STATUS[grpcCode] ?? 500;
@@ -561,38 +548,6 @@ export async function authRoutes(app, { userClient }) {
       });
       return reply.send({
         items: response.items.map(mapUserSummary),
-        page: response.page,
-      });
-    } catch (error) {
-      return sendProblem(reply, request, error);
-    }
-  });
-
-  app.get('/api/v1/executors', async (request, reply) => {
-    const token = request.cookies['__Host-session'];
-    if (!token) {
-      return reply.code(401).type('application/problem+json').send({
-        type: 'https://rp-gant.local/problems/unauthenticated',
-        title: TITLES[401],
-        status: 401,
-        detail: 'Session is required',
-        instance: request.url,
-        code: 'unauthenticated',
-        traceId: request.id,
-      });
-    }
-    try {
-      await call(userClient, 'ValidateSession', { session_token: token, extend_idle: false });
-      const limit = Math.min(Math.max(Number(request.query.limit ?? 100), 1), 200);
-      const offset = Math.max(Number(request.query.offset ?? 0), 0);
-      const response = await call(userClient, 'ListExecutors', {
-        query: String(request.query.query ?? ''),
-        project_id: String(request.query.projectId ?? ''),
-        include_inactive: request.query.includeInactive === 'true',
-        page: { limit, offset },
-      });
-      return reply.send({
-        items: response.items.map(mapExecutor),
         page: response.page,
       });
     } catch (error) {

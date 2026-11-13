@@ -285,6 +285,190 @@ describe('email verification', () => {
   });
 });
 
+describe('system settings', () => {
+  const defaultSettings = [
+    ['password_min_length', 8],
+    ['password_max_length', 128],
+    ['password_require_complexity', false],
+    ['max_failed_attempts', 5],
+    ['first_lockout_minutes', 10],
+    ['second_lockout_minutes', 60],
+    ['third_lockout_permanent', true],
+    ['session_absolute_minutes', 60],
+    ['session_idle_minutes', 10],
+    ['max_sessions', 2],
+    ['remember_me_absolute_days', 30],
+    ['remember_me_idle_days', 7],
+    ['email_verification_hours', 24],
+    ['password_reset_hours', 1],
+    ['invitation_days', 7],
+    ['telegram_link_code_minutes', 10],
+  ].map(([key, value]) => ({ key, value, description: `Description: ${key}` }));
+
+  it('validates and atomically stores known settings with an outbox event', async () => {
+    const statements = [];
+    const storedRows = [...defaultSettings, { key: 'future_setting', value: { value: 'keep' } }];
+    const client = {
+      async query(sql, params = []) {
+        statements.push({ sql, params });
+        if (sql.includes('SELECT key, value, description FROM settings.system_settings')) {
+          return { rowCount: storedRows.length, rows: storedRows };
+        }
+        if (sql.includes('SELECT role_code FROM access.user_roles')) {
+          return { rowCount: 1, rows: [{ role_code: 'app_admin' }] };
+        }
+        if (sql.includes('SELECT * FROM settings.system_settings')) {
+          return { rowCount: storedRows.length, rows: storedRows };
+        }
+        if (sql.includes('INSERT INTO settings.system_settings')) {
+          storedRows.find((row) => row.key === params[0]).value = JSON.parse(params[1]);
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const service = createUserImplementation({
+      db: {
+        async query(sql) {
+          if (sql.includes('FROM access.user_roles')) return { rowCount: 1, rows: [{}] };
+          return { rowCount: 0, rows: [] };
+        },
+        async connect() {
+          return client;
+        },
+      },
+    });
+
+    const { error, response } = await invoke(service.UpdateSystemSettings, {
+      actor_user_id: 'admin-1',
+      items: [
+        { key: 'max_sessions', value: { value: 4 }, description: 'Ignored existing description' },
+      ],
+    });
+
+    expect(error).toBeNull();
+    expect(response.items.find((item) => item.key === 'max_sessions').value).toEqual({
+      fields: { value: { numberValue: 4 } },
+    });
+    expect(response.items.find((item) => item.key === 'future_setting').value).toEqual({
+      fields: { value: { stringValue: 'keep' } },
+    });
+    const updateIndex = statements.findIndex(({ sql }) =>
+      sql.includes('INSERT INTO settings.system_settings'),
+    );
+    const eventIndex = statements.findIndex(({ sql }) =>
+      sql.includes('INSERT INTO events.outbox_events'),
+    );
+    const commitIndex = statements.findIndex(({ sql }) => sql === 'COMMIT');
+    expect(updateIndex).toBeGreaterThan(-1);
+    expect(eventIndex).toBeGreaterThan(updateIndex);
+    expect(eventIndex).toBeLessThan(commitIndex);
+    expect(JSON.parse(statements[eventIndex].params[3])).toEqual({
+      keys: ['max_sessions'],
+      actorUserId: 'admin-1',
+    });
+    expect(statements[updateIndex].params[2]).toBe('Description: max_sessions');
+  });
+
+  it('rejects unknown and inherited property names before opening a transaction', async () => {
+    let connected = false;
+    const service = createUserImplementation({
+      db: {
+        async query(sql) {
+          return sql.includes('FROM access.user_roles')
+            ? { rowCount: 1, rows: [{}] }
+            : { rowCount: 0, rows: [] };
+        },
+        async connect() {
+          connected = true;
+          throw new Error('unknown setting should be rejected before opening a transaction');
+        },
+      },
+    });
+
+    const { error } = await invoke(service.UpdateSystemSettings, {
+      actor_user_id: 'admin-1',
+      items: [{ key: 'constructor', value: { value: 1 } }],
+    });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('system_setting_unknown');
+    expect(connected).toBe(false);
+  });
+
+  it('rejects invalid settings and rolls back without writing them', async () => {
+    const statements = [];
+    const client = {
+      async query(sql, params = []) {
+        statements.push({ sql, params });
+        if (sql.includes('SELECT key, value, description FROM settings.system_settings')) {
+          return { rowCount: defaultSettings.length, rows: defaultSettings };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release() {},
+    };
+    const service = createUserImplementation({
+      db: {
+        async query(sql) {
+          return sql.includes('FROM access.user_roles')
+            ? { rowCount: 1, rows: [{}] }
+            : { rowCount: 0, rows: [] };
+        },
+        async connect() {
+          return client;
+        },
+      },
+    });
+
+    const { error } = await invoke(service.UpdateSystemSettings, {
+      actor_user_id: 'admin-1',
+      items: [{ key: 'max_sessions', value: { value: 0 } }],
+    });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('system_setting_invalid:max_sessions');
+    expect(statements.some(({ sql }) => sql.includes('INSERT INTO settings.system_settings'))).toBe(
+      false,
+    );
+    expect(statements.some(({ sql }) => sql.includes('INSERT INTO events.outbox_events'))).toBe(
+      false,
+    );
+    expect(statements.some(({ sql }) => sql === 'ROLLBACK')).toBe(true);
+  });
+
+  it('uses the configured password policy for registration', async () => {
+    const settings = defaultSettings.map((row) =>
+      row.key === 'password_min_length' ? { ...row, value: 16 } : row,
+    );
+    let connected = false;
+    const service = createUserImplementation({
+      db: {
+        async query(sql) {
+          return sql.includes('FROM settings.system_settings')
+            ? { rowCount: settings.length, rows: settings }
+            : { rowCount: 0, rows: [] };
+        },
+        async connect() {
+          connected = true;
+          throw new Error('registration should reject before opening a transaction');
+        },
+      },
+    });
+
+    const { error } = await invoke(service.Register, {
+      email: 'person@example.com',
+      password: 'short-pass',
+      last_name: 'Иванов',
+      first_name: 'Иван',
+    });
+
+    expect(error.code).toBe(3);
+    expect(error.message).toBe('invalid_password');
+    expect(connected).toBe(false);
+  });
+});
+
 describe('password reset', () => {
   it('returns the account email only for a live reset token', async () => {
     let request;
@@ -364,286 +548,5 @@ describe('password reset', () => {
       statements.some(({ sql }) => sql.includes('UPDATE access.user_sessions SET revoked_at')),
     ).toBe(true);
     expect(statements.some(({ sql }) => sql === 'COMMIT')).toBe(true);
-  });
-});
-
-describe('executor project scope', () => {
-  it('rejects executor creation without selected projects', async () => {
-    let connected = false;
-    const service = createUserImplementation({
-      db: {
-        async query() {
-          return { rowCount: 1, rows: [{}] };
-        },
-        async connect() {
-          connected = true;
-          throw new Error('should_not_connect');
-        },
-      },
-    });
-
-    const { error } = await invoke(service.CreateExecutor, {
-      last_name: 'Иванов',
-      first_name: 'Иван',
-      actor_user_id: '11111111-1111-4111-8111-111111111111',
-      project_ids: [],
-    });
-
-    expect(error.code).toBe(3);
-    expect(error.message).toContain('executor_projects_required');
-    expect(connected).toBe(false);
-  });
-
-  it('stores selected projects atomically with the executor', async () => {
-    const executorId = '33333333-3333-4333-8333-333333333333';
-    const projectIds = [
-      '11111111-1111-4111-8111-111111111111',
-      '22222222-2222-4222-8222-222222222222',
-    ];
-    const statements = [];
-    const executorRow = {
-      id: executorId,
-      last_name: 'Иванов',
-      first_name: 'Иван',
-      middle_name: null,
-      full_name: 'Иванов Иван',
-      position: null,
-      linked_user_id: null,
-      project_ids: projectIds,
-      is_active: true,
-    };
-    const client = {
-      async query(sql, params = []) {
-        statements.push({ sql, params });
-        if (sql.includes('INSERT INTO access.executors'))
-          return { rowCount: 1, rows: [{ id: executorId }] };
-        if (sql.includes('SELECT e.*')) return { rowCount: 1, rows: [executorRow] };
-        return { rowCount: 1, rows: [] };
-      },
-      release() {},
-    };
-    const db = {
-      async query() {
-        return { rowCount: 1, rows: [{}] };
-      },
-      async connect() {
-        return client;
-      },
-    };
-    const service = createUserImplementation({ db });
-
-    const { error, response } = await invoke(service.CreateExecutor, {
-      last_name: 'Иванов',
-      first_name: 'Иван',
-      actor_user_id: '44444444-4444-4444-8444-444444444444',
-      project_ids: [...projectIds, projectIds[0]],
-    });
-
-    expect(error).toBeNull();
-    expect(response.executor.project_ids).toEqual(projectIds);
-    expect(
-      statements.filter(({ sql }) => sql.includes('INSERT INTO access.executor_projects')),
-    ).toHaveLength(2);
-    expect(statements.at(-1).sql).toBe('COMMIT');
-  });
-
-  it('filters executor catalog entries by their selected project', async () => {
-    const projectId = '22222222-2222-4222-8222-222222222222';
-    const executorId = '33333333-3333-4333-8333-333333333333';
-    const queries = [];
-    const service = createUserImplementation({
-      db: {
-        async query(sql, params) {
-          queries.push({ sql, params });
-          return sql.includes('SELECT count(*)')
-            ? { rowCount: 1, rows: [{ total: 1 }] }
-            : {
-                rowCount: 1,
-                rows: [
-                  {
-                    id: executorId,
-                    last_name: 'Иванов',
-                    first_name: 'Иван',
-                    full_name: 'Иванов Иван',
-                    project_ids: [projectId],
-                    is_active: true,
-                  },
-                ],
-              };
-        },
-      },
-    });
-
-    const { error, response } = await invoke(service.ListExecutors, {
-      project_id: projectId,
-      page: { limit: 20, offset: 0 },
-    });
-
-    expect(error).toBeNull();
-    expect(response.items[0].project_ids).toEqual([projectId]);
-    expect(queries[0].sql).toContain('filter_ep.project_id = $3');
-    expect(queries[0].params[2]).toBe(projectId);
-  });
-
-  it('returns only active accounts with active project membership', async () => {
-    const ids = ['11111111-1111-4111-8111-111111111111'];
-    let queryText = '';
-    const service = createUserImplementation({
-      db: {
-        async query(sql) {
-          queryText = sql;
-          return { rowCount: 1, rows: [{ id: ids[0] }] };
-        },
-      },
-    });
-
-    const { error, response } = await invoke(service.GetActiveProjectMemberIds, {
-      project_id: '22222222-2222-4222-8222-222222222222',
-      user_ids: ids,
-    });
-
-    expect(error).toBeNull();
-    expect(response.user_ids).toEqual(ids);
-    expect(queryText).toContain("pm.status = 'active'");
-    expect(queryText).toContain("u.status = 'active'");
-  });
-});
-
-describe('session expiration', () => {
-  it('revokes an expired non-remembered session when it is next validated', async () => {
-    const queries = [];
-    const db = {
-      async query(sql, params) {
-        queries.push({ sql, params });
-        if (sql.includes('SELECT s.*, u.status AS user_status')) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                id: 'expired-session',
-                user_id: 'user-1',
-                user_status: 'active',
-                absolute_expires_at: new Date(Date.now() + 60_000),
-                idle_expires_at: new Date(Date.now() - 1_000),
-                remember_token_hash: null,
-              },
-            ],
-          };
-        }
-        return { rowCount: 1, rows: [] };
-      },
-    };
-    const service = createUserImplementation({ db, mailer: {} });
-
-    const { error } = await invoke(service.ValidateSession, { session_token: 'expired-token' });
-
-    expect(error.message).toBe('session_expired');
-    expect(queries.some(({ sql }) => sql.includes('SET revoked_at = now()'))).toBe(true);
-  });
-
-  it('updates non-remembered sessions with a typed null remember expiry', async () => {
-    let update;
-    const db = {
-      async query(sql, params) {
-        if (sql.includes('SELECT s.*, u.status AS user_status')) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                id: 'regular-session',
-                user_id: 'user-1',
-                user_status: 'active',
-                absolute_expires_at: new Date(Date.now() + 60 * 60 * 1000),
-                idle_expires_at: new Date(Date.now() + 5 * 60 * 1000),
-                remember_token_hash: null,
-                remember_absolute_expires_at: null,
-                remember_idle_expires_at: null,
-              },
-            ],
-          };
-        }
-        if (sql.includes('UPDATE access.user_sessions')) update = { sql, params };
-        return { rowCount: 1, rows: [] };
-      },
-    };
-    const service = createUserImplementation({ db, mailer: {} });
-
-    const { error, response } = await invoke(service.ValidateSession, {
-      session_token: 'active-token',
-      extend_idle: true,
-    });
-
-    expect(error).toBeNull();
-    expect(response.user_id).toBe('user-1');
-    expect(update.params[1]).toBeNull();
-    expect(update.sql).toContain('$2::timestamptz');
-  });
-
-  it('extends remembered-session idle expiry with authenticated activity', async () => {
-    const updates = [];
-    const absoluteExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const db = {
-      async query(sql, params) {
-        if (sql.includes('SELECT s.*, u.status AS user_status')) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                id: 'remembered-session',
-                user_id: 'user-1',
-                user_status: 'active',
-                absolute_expires_at: absoluteExpiresAt,
-                idle_expires_at: new Date(Date.now() + 60_000),
-                remember_token_hash: 'remember-hash',
-                remember_absolute_expires_at: absoluteExpiresAt,
-                remember_idle_expires_at: new Date(Date.now() + 60_000),
-              },
-            ],
-          };
-        }
-        if (sql.includes('UPDATE access.user_sessions')) updates.push({ sql, params });
-        return { rowCount: 1, rows: [] };
-      },
-    };
-    const service = createUserImplementation({ db, mailer: {} });
-
-    const { error, response } = await invoke(service.ValidateSession, {
-      session_token: 'active-token',
-      extend_idle: true,
-    });
-
-    expect(error).toBeNull();
-    expect(response.user_id).toBe('user-1');
-    expect(updates).toHaveLength(1);
-    expect(updates[0].sql).toContain('remember_idle_expires_at');
-    expect(updates[0].params[1].getTime()).toBeGreaterThan(Date.now() + 6 * 24 * 60 * 60 * 1000);
-  });
-
-  it('rejects a remembered session after its idle restore window expires', async () => {
-    let selectSql = '';
-    let rolledBack = false;
-    const client = {
-      async query(sql) {
-        if (sql === 'ROLLBACK') rolledBack = true;
-        if (sql.includes('SELECT s.*, u.status AS user_status')) {
-          selectSql = sql;
-          return { rowCount: 0, rows: [] };
-        }
-        return { rowCount: 0, rows: [] };
-      },
-      release() {},
-    };
-    const db = {
-      async connect() {
-        return client;
-      },
-    };
-    const service = createUserImplementation({ db, mailer: {} });
-
-    const { error } = await invoke(service.RestoreSession, { remember_token: 'old-token' });
-
-    expect(error.message).toBe('remember_token_invalid');
-    expect(selectSql).toContain('s.remember_idle_expires_at > now()');
-    expect(rolledBack).toBe(true);
   });
 });

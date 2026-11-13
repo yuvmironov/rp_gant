@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { toProtoStruct } from '@rp-gant/service-kit';
 import { buildApp } from '../src/app.js';
 
 const apps = [];
@@ -39,6 +40,49 @@ const user = {
 };
 
 describe('api-gateway auth routes', () => {
+  it('round-trips system setting values as google.protobuf.Struct', async () => {
+    let updateRequest;
+    const app = build({
+      ValidateSession(_request, callback) {
+        callback(null, { user_id: 'admin-1' });
+      },
+      GetUserRoles(_request, callback) {
+        callback(null, { global_roles: ['GLOBAL_ROLE_APP_ADMIN'] });
+      },
+      GetSystemSettings(_request, callback) {
+        callback(null, {
+          items: [{ key: 'password_min_length', value: toProtoStruct({ value: 8 }) }],
+        });
+      },
+      UpdateSystemSettings(request, callback) {
+        updateRequest = request;
+        callback(null, { items: request.items });
+      },
+    });
+    const cookies = { '__Host-session': 'token', '__Host-csrf': 'csrf' };
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/settings',
+      cookies,
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json().items[0].value).toEqual({ value: 8 });
+
+    const updateResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/settings',
+      cookies,
+      headers: { 'x-csrf-token': 'csrf' },
+      payload: {
+        items: [{ key: 'password_min_length', value: { value: 8 } }],
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateRequest.items[0].value).toEqual(toProtoStruct({ value: 8 }));
+    expect(updateResponse.json().items[0].value).toEqual({ value: 8 });
+  });
   it('maps register request and response', async () => {
     let received;
     const app = build({
@@ -241,85 +285,6 @@ describe('api-gateway auth routes', () => {
 
     expect(response.statusCode).toBe(204);
     expect(response.headers['set-cookie'][0]).toContain('__Host-session=');
-  });
-
-  it('passes projectId through to the scoped executor catalog', async () => {
-    const projectId = '22222222-2222-4222-8222-222222222222';
-    let request;
-    const app = build({
-      ValidateSession(_request, callback) {
-        callback(null, { user_id: 'user-1' });
-      },
-      ListExecutors(value, callback) {
-        request = value;
-        callback(null, {
-          items: [{ id: 'executor-1', project_ids: [projectId], is_active: true }],
-          page: { total: 1, limit: 100, offset: 0 },
-        });
-      },
-    });
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/v1/executors?projectId=${projectId}`,
-      cookies: { '__Host-session': 'token' },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(request.project_id).toBe(projectId);
-    expect(response.json().items[0].projectIds).toEqual([projectId]);
-    expect(response.json().items[0]).not.toHaveProperty('linkedUserId');
-  });
-
-  it('requires an active project selection when creating an executor', async () => {
-    const projectId = '22222222-2222-4222-8222-222222222222';
-    let createRequest;
-    const app = build(
-      {
-        ValidateSession(_request, callback) {
-          callback(null, { user_id: 'admin-1' });
-        },
-        GetUserRoles(_request, callback) {
-          callback(null, { global_roles: ['GLOBAL_ROLE_APP_ADMIN'] });
-        },
-        CreateExecutor(request, callback) {
-          createRequest = request;
-          callback(null, {
-            executor: {
-              id: 'executor-1',
-              last_name: 'Иванов',
-              first_name: 'Иван',
-              full_name: 'Иванов Иван',
-              project_ids: [projectId],
-              is_active: true,
-            },
-          });
-        },
-      },
-      {
-        ListProjects(request, callback) {
-          expect(request.user_id).toBe('admin-1');
-          expect(request.status).toBe('PROJECT_STATUS_ACTIVE');
-          callback(null, { items: [{ id: projectId }], page: { total: 1 } });
-        },
-      },
-    );
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/executors',
-      cookies: { '__Host-session': 'token', '__Host-csrf': 'csrf' },
-      headers: { 'x-csrf-token': 'csrf' },
-      payload: {
-        lastName: 'Иванов',
-        firstName: 'Иван',
-        projectIds: [projectId],
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    expect(createRequest.project_ids).toEqual([projectId]);
-    expect(response.json().projectIds).toEqual([projectId]);
   });
 
   it('issues a project-scoped sync token', async () => {

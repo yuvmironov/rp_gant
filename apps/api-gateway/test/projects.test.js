@@ -592,7 +592,6 @@ describe('api-gateway project routes', () => {
           assignee_type: 'ASSIGNEE_TYPE_USER',
           assignee_id: 'user-1',
           display_name: 'User One',
-          linked_user_id: 'user-1',
           resolved: true,
         },
       ],
@@ -634,6 +633,29 @@ describe('api-gateway project routes', () => {
         },
       ],
     });
+  });
+
+  it('does not coerce catalog assignment types to user assignees', async () => {
+    let received;
+    const app = build(sessionUser, {
+      SetTaskAssignments(request, _metadata, callback) {
+        received = request;
+        callback(null, { task: { id: 'task-1', assignments: [] }, revision: '0' });
+      },
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/tasks/task-1/assignments',
+      cookies: { '__Host-session': 'token', '__Host-csrf': 'csrf' },
+      headers: { 'x-csrf-token': 'csrf' },
+      payload: {
+        assignments: [{ role: 'executor', assigneeType: 'executor', assigneeId: 'user-1' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(received.assignments[0].assignee_type).toBe('ASSIGNEE_TYPE_UNSPECIFIED');
   });
 
   it('updates, reorders, assigns and deletes directions', async () => {

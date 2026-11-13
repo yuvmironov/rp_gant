@@ -43,6 +43,72 @@ function userClient({ accessible, permission = { allowed: false } }) {
 }
 
 describe('Project Service authorization', () => {
+  it('resolves assignment user display names through the User Service', async () => {
+    const taskId = '11111111-1111-4111-8111-111111111111';
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    const assigneeId = '33333333-3333-4333-8333-333333333333';
+    const requests = [];
+    const client = userClient({
+      accessible: { is_admin: false, items: [] },
+      permission: { allowed: true },
+    });
+    client.GetUsersByIds = (request, callback) => {
+      requests.push(request);
+      callback(null, {
+        items: [{ id: assigneeId, display_name: 'Исполнитель', status: 'USER_STATUS_ACTIVE' }],
+      });
+    };
+    const task = {
+      id: taskId,
+      diagram_id: '44444444-4444-4444-8444-444444444444',
+      direction_id: '55555555-5555-4555-8555-555555555555',
+      name: 'Task',
+      status: 'planned',
+      priority: 'medium',
+      version: 1,
+    };
+    const service = createProjectImplementation({
+      db: {
+        async query(sql) {
+          if (sql.includes('FROM plan.tasks')) return { rowCount: 1, rows: [task] };
+          if (sql.includes('FROM project.diagrams')) {
+            return { rowCount: 1, rows: [{ project_id: projectId }] };
+          }
+          if (sql.includes('FROM plan.assignments')) {
+            return {
+              rowCount: 1,
+              rows: [
+                {
+                  id: 'assignment-1',
+                  assignee_type: 'user',
+                  assignee_id: assigneeId,
+                  role: 'executor',
+                },
+              ],
+            };
+          }
+          throw new Error(`Unexpected query: ${sql}`);
+        },
+      },
+      userClient: client,
+    });
+
+    const { error, response } = await invoke(service.GetTask, { task_id: taskId });
+
+    expect(error).toBeNull();
+    expect(response.task.assignments).toEqual([
+      {
+        id: 'assignment-1',
+        role: 'ASSIGNMENT_ROLE_EXECUTOR',
+        assignee_type: 'ASSIGNEE_TYPE_USER',
+        assignee_id: assigneeId,
+        display_name: 'Исполнитель',
+        resolved: true,
+      },
+    ]);
+    expect(requests).toEqual([{ user_ids: [assigneeId] }]);
+  });
+
   it('rejects responsible assignments on tasks before accessing the database', async () => {
     const service = createProjectImplementation({
       db: {
@@ -260,7 +326,7 @@ describe('Project Service authorization', () => {
     );
 
     expect(error.code).toBe(3);
-    expect(error.message).toBe('executor_assignment_not_supported');
+    expect(error.message).toBe('invalid_assignment');
     expect(connected).toBe(false);
   });
 

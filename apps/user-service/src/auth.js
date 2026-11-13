@@ -1,12 +1,48 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import { getActorRoles, queueUserEvent } from './events.js';
+import { fromProtoStruct, toProtoStruct } from '@rp-gant/service-kit';
 import { status } from '@grpc/grpc-js';
 
-const SESSION_ABSOLUTE_MS = 60 * 60 * 1000;
-const SESSION_IDLE_MS = 10 * 60 * 1000;
-const REMEMBER_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000;
-const REMEMBER_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const DEFAULT_SYSTEM_SETTINGS = Object.freeze({
+  password_min_length: 8,
+  password_max_length: 128,
+  password_require_complexity: false,
+  max_failed_attempts: 5,
+  first_lockout_minutes: 10,
+  second_lockout_minutes: 60,
+  third_lockout_permanent: true,
+  session_absolute_minutes: 60,
+  session_idle_minutes: 10,
+  max_sessions: 2,
+  remember_me_absolute_days: 30,
+  remember_me_idle_days: 7,
+  email_verification_hours: 24,
+  password_reset_hours: 1,
+  invitation_days: 7,
+  telegram_link_code_minutes: 10,
+});
+const SYSTEM_SETTING_RULES = Object.freeze({
+  password_min_length: { type: 'integer', min: 1, max: 1024 },
+  password_max_length: { type: 'integer', min: 1, max: 1024 },
+  password_require_complexity: { type: 'boolean' },
+  max_failed_attempts: { type: 'integer', min: 1, max: 100 },
+  first_lockout_minutes: { type: 'integer', min: 1, max: 10080 },
+  second_lockout_minutes: { type: 'integer', min: 1, max: 10080 },
+  third_lockout_permanent: { type: 'boolean' },
+  session_absolute_minutes: { type: 'integer', min: 1, max: 525600 },
+  session_idle_minutes: { type: 'integer', min: 1, max: 525600 },
+  max_sessions: { type: 'integer', min: 1, max: 20 },
+  remember_me_absolute_days: { type: 'integer', min: 1, max: 3650 },
+  remember_me_idle_days: { type: 'integer', min: 1, max: 3650 },
+  email_verification_hours: { type: 'integer', min: 1, max: 720 },
+  password_reset_hours: { type: 'integer', min: 1, max: 168 },
+  invitation_days: { type: 'integer', min: 1, max: 365 },
+  telegram_link_code_minutes: { type: 'integer', min: 1, max: 1440 },
+});
 const ACTIVE_SESSION_PREDICATE = `(
   (absolute_expires_at > now() AND idle_expires_at > now())
   OR (
@@ -15,9 +51,6 @@ const ACTIVE_SESSION_PREDICATE = `(
     AND remember_idle_expires_at > now()
   )
 )`;
-const EMAIL_VERIFICATION_MS = 24 * 60 * 60 * 1000;
-const PASSWORD_RESET_MS = 60 * 60 * 1000;
-const INVITATION_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE = '__Host-session';
 const REMEMBER_COOKIE = '__Host-remember';
 const CSRF_COOKIE = '__Host-csrf';
@@ -30,9 +63,6 @@ function grpcError(code, message) {
 
 function mapDbError(error) {
   if (error.code === '23505') {
-    if (String(error.constraint ?? '').includes('executor')) {
-      return grpcError(status.ALREADY_EXISTS, 'executor_conflict');
-    }
     return grpcError(status.ALREADY_EXISTS, 'email_taken');
   }
   if (error.message === 'session_limit_reached') {
@@ -118,51 +148,7 @@ function toUser(row, roles) {
   };
 }
 
-function toExecutor(row) {
-  return {
-    id: row.id,
-    last_name: row.last_name,
-    first_name: row.first_name,
-    middle_name: row.middle_name ?? '',
-    full_name: row.full_name,
-    position: row.position ?? '',
-    linked_user_id: row.linked_user_id ?? '',
-    project_ids: row.project_ids ?? [],
-    is_active: row.is_active,
-    created_at: toTimestamp(row.created_at),
-    updated_at: toTimestamp(row.updated_at),
-  };
-}
-
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function normalizeExecutorProjectIds(values) {
-  if (!Array.isArray(values)) return null;
-  const projectIds = [
-    ...new Set(
-      values.map((value) =>
-        String(value ?? '')
-          .trim()
-          .toLowerCase(),
-      ),
-    ),
-  ];
-  if (!projectIds.length || projectIds.some((id) => !UUID_PATTERN.test(id))) return null;
-  return projectIds;
-}
-
-async function getExecutorWithProjects(queryable, executorId) {
-  const result = await queryable.query(
-    `SELECT e.*,
-            COALESCE(array_agg(ep.project_id ORDER BY ep.project_id) FILTER (WHERE ep.project_id IS NOT NULL), '{}') AS project_ids
-     FROM access.executors e
-     LEFT JOIN access.executor_projects ep ON ep.executor_id = e.id
-     WHERE e.id = $1
-     GROUP BY e.id`,
-    [executorId],
-  );
-  return result.rows[0];
-}
 
 function fromProjectRole(role) {
   return (
@@ -227,19 +213,6 @@ async function canManageProject(db, projectId, userId) {
   return result.rowCount > 0;
 }
 
-async function canManageExecutors(db, userId) {
-  if (!userId) return false;
-  const result = await db.query(
-    `SELECT 1 FROM access.user_roles WHERE user_id = $1 AND role_code = 'app_admin'
-     UNION ALL
-     SELECT 1 FROM access.project_memberships
-     WHERE user_id = $1 AND role_code = 'project_owner' AND status = 'active'
-     LIMIT 1`,
-    [userId],
-  );
-  return result.rowCount > 0;
-}
-
 async function isAdmin(db, userId) {
   if (!userId) return false;
   const result = await db.query(
@@ -289,10 +262,12 @@ async function queueAuthEmail(
 const telegramCodes = new Map();
 
 function settingsStructValue(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : { value };
+  const object = value && typeof value === 'object' && !Array.isArray(value) ? value : { value };
+  return toProtoStruct(object);
 }
 
 function storedSettingsValue(value) {
+  value = fromProtoStruct(value);
   if (
     value &&
     typeof value === 'object' &&
@@ -303,6 +278,62 @@ function storedSettingsValue(value) {
     return value.value;
   }
   return value ?? {};
+}
+
+function settingsFromRows(rows) {
+  const values = { ...DEFAULT_SYSTEM_SETTINGS };
+  for (const row of rows ?? []) {
+    if (!Object.hasOwn(SYSTEM_SETTING_RULES, row.key)) continue;
+    const rule = SYSTEM_SETTING_RULES[row.key];
+    const value = storedSettingsValue(row.value);
+    if (rule.type === 'boolean' && typeof value === 'boolean') values[row.key] = value;
+    if (
+      rule.type === 'integer' &&
+      Number.isInteger(value) &&
+      value >= rule.min &&
+      value <= rule.max
+    ) {
+      values[row.key] = value;
+    }
+  }
+  return validateSystemSettings(values) ? { ...DEFAULT_SYSTEM_SETTINGS } : values;
+}
+
+async function loadSystemSettings(queryable) {
+  const result = await queryable.query('SELECT key, value FROM settings.system_settings');
+  return settingsFromRows(result.rows);
+}
+
+function validateSystemSettings(values) {
+  for (const [key, rule] of Object.entries(SYSTEM_SETTING_RULES)) {
+    const value = values[key];
+    if (rule.type === 'boolean') {
+      if (typeof value !== 'boolean') return `system_setting_invalid:${key}`;
+    } else if (!Number.isInteger(value) || value < rule.min || value > rule.max) {
+      return `system_setting_invalid:${key}`;
+    }
+  }
+  if (values.password_min_length > values.password_max_length) {
+    return 'system_setting_password_range_invalid';
+  }
+  if (values.first_lockout_minutes > values.second_lockout_minutes) {
+    return 'system_setting_lockout_order_invalid';
+  }
+  if (values.session_idle_minutes > values.session_absolute_minutes) {
+    return 'system_setting_session_range_invalid';
+  }
+  if (values.remember_me_idle_days > values.remember_me_absolute_days) {
+    return 'system_setting_remember_range_invalid';
+  }
+  return '';
+}
+
+function passwordAllowed(password, settings) {
+  return (
+    password.length >= settings.password_min_length &&
+    password.length <= settings.password_max_length &&
+    (!settings.password_require_complexity || /[^\p{L}\p{N}]/u.test(password))
+  );
 }
 
 function toSettings(row) {
@@ -330,7 +361,7 @@ function clearCookie(name) {
   return cookie(name, '', { maxAge: 0 });
 }
 
-function loginCookies({ sessionToken, rememberToken, csrfToken, remember }) {
+function loginCookies({ sessionToken, rememberToken, csrfToken, remember, rememberAbsoluteMs }) {
   const values = [
     cookie(SESSION_COOKIE, sessionToken),
     cookie(CSRF_COOKIE, csrfToken, { httpOnly: false }),
@@ -338,7 +369,7 @@ function loginCookies({ sessionToken, rememberToken, csrfToken, remember }) {
   if (remember && rememberToken) {
     values.push(
       cookie(REMEMBER_COOKIE, rememberToken, {
-        maxAge: Math.floor(REMEMBER_ABSOLUTE_MS / 1000),
+        maxAge: Math.floor(rememberAbsoluteMs / 1000),
       }),
     );
   }
@@ -429,12 +460,19 @@ export function createUserImplementation({
       const middleName = String(call.request.middle_name ?? '').trim();
       const displayName =
         String(call.request.display_name ?? '').trim() || `${lastName} ${firstName}`.trim();
+      let settings;
+      try {
+        settings = await loadSystemSettings(db);
+      } catch (error) {
+        callback(mapDbError(error));
+        return;
+      }
 
       if (!isValidEmail(email)) {
         callback(grpcError(status.INVALID_ARGUMENT, 'invalid_email'));
         return;
       }
-      if (password.length < 8 || password.length > 128) {
+      if (!passwordAllowed(password, settings)) {
         callback(grpcError(status.INVALID_ARGUMENT, 'invalid_password'));
         return;
       }
@@ -472,10 +510,11 @@ export function createUserImplementation({
         const userId = result.rows[0].id;
         if (!devAutoVerify) {
           const token = randomToken();
+          const verificationLifetimeMs = settings.email_verification_hours * HOUR_MS;
           await client.query(
             `INSERT INTO access.email_verification_tokens (user_id, token_hash, expires_at)
              VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
-            [userId, hashToken(token), EMAIL_VERIFICATION_MS],
+            [userId, hashToken(token), verificationLifetimeMs],
           );
           await queueAuthEmail(client, {
             userId,
@@ -485,7 +524,7 @@ export function createUserImplementation({
               link: emailVerificationLink(publicAppUrl, token),
             },
             locale,
-            expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_MS),
+            expiresAt: new Date(Date.now() + verificationLifetimeMs),
           });
         }
 
@@ -575,6 +614,7 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
         const userResult = await client.query(
           'SELECT * FROM access.users WHERE email = $1 FOR UPDATE',
           [email],
@@ -604,14 +644,16 @@ export function createUserImplementation({
           let lockedUntil = user.locked_until;
           let userStatus = user.status;
 
-          if (attempts >= 5) {
+          if (attempts >= settings.max_failed_attempts) {
             level = Math.min(level + 1, 3);
             attempts = 0;
-            if (level >= 3) {
+            if (level >= 3 && settings.third_lockout_permanent) {
               userStatus = 'blocked';
               lockedUntil = null;
             } else {
-              lockedUntil = new Date(Date.now() + (level === 1 ? 10 : 60) * 60 * 1000);
+              const durationMinutes =
+                level === 1 ? settings.first_lockout_minutes : settings.second_lockout_minutes;
+              lockedUntil = new Date(Date.now() + durationMinutes * MINUTE_MS);
             }
           }
 
@@ -658,10 +700,15 @@ export function createUserImplementation({
         const rememberToken = remember ? randomToken() : null;
         const csrfToken = randomToken();
         const now = Date.now();
-        const absoluteExpiresAt = new Date(
-          now + (remember ? REMEMBER_ABSOLUTE_MS : SESSION_ABSOLUTE_MS),
-        );
-        const idleExpiresAt = new Date(now + (remember ? REMEMBER_IDLE_MS : SESSION_IDLE_MS));
+        const rememberAbsoluteMs = settings.remember_me_absolute_days * DAY_MS;
+        const absoluteLifetimeMs = remember
+          ? rememberAbsoluteMs
+          : settings.session_absolute_minutes * MINUTE_MS;
+        const idleLifetimeMs = remember
+          ? settings.remember_me_idle_days * DAY_MS
+          : settings.session_idle_minutes * MINUTE_MS;
+        const absoluteExpiresAt = new Date(now + absoluteLifetimeMs);
+        const idleExpiresAt = new Date(now + idleLifetimeMs);
 
         const sessionResult = await client.query(
           `INSERT INTO access.user_sessions
@@ -714,6 +761,7 @@ export function createUserImplementation({
             rememberToken,
             csrfToken,
             remember,
+            rememberAbsoluteMs,
           }),
           absolute_expires_at: toTimestamp(absoluteExpiresAt),
           idle_expires_at: toTimestamp(idleExpiresAt),
@@ -864,6 +912,7 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
         const user = await findUserByEmail(client, email);
         if (user && !user.email_verified_at) {
           const token = randomToken();
@@ -872,10 +921,11 @@ export function createUserImplementation({
              WHERE user_id = $1 AND used_at IS NULL`,
             [user.id],
           );
+          const verificationLifetimeMs = settings.email_verification_hours * HOUR_MS;
           await client.query(
             `INSERT INTO access.email_verification_tokens (user_id, token_hash, expires_at)
              VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
-            [user.id, hashToken(token), EMAIL_VERIFICATION_MS],
+            [user.id, hashToken(token), verificationLifetimeMs],
           );
           await queueAuthEmail(client, {
             userId: user.id,
@@ -885,7 +935,7 @@ export function createUserImplementation({
               link: emailVerificationLink(publicAppUrl, token),
             },
             locale: user.locale ?? 'ru-RU',
-            expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_MS),
+            expiresAt: new Date(Date.now() + verificationLifetimeMs),
           });
         }
         await client.query('COMMIT');
@@ -908,6 +958,7 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
         const user = await findUserByEmail(client, email);
         if (user && user.status === 'active') {
           const token = randomToken();
@@ -916,10 +967,11 @@ export function createUserImplementation({
              WHERE user_id = $1 AND used_at IS NULL`,
             [user.id],
           );
+          const resetLifetimeMs = settings.password_reset_hours * HOUR_MS;
           await client.query(
             `INSERT INTO access.password_reset_tokens (user_id, token_hash, expires_at)
              VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
-            [user.id, hashToken(token), PASSWORD_RESET_MS],
+            [user.id, hashToken(token), resetLifetimeMs],
           );
           await queueAuthEmail(client, {
             userId: user.id,
@@ -927,7 +979,7 @@ export function createUserImplementation({
             templateCode: 'password_reset',
             variables: { link: resetLink(publicAppUrl, token) },
             locale: user.locale ?? 'ru-RU',
-            expiresAt: new Date(Date.now() + PASSWORD_RESET_MS),
+            expiresAt: new Date(Date.now() + resetLifetimeMs),
           });
         }
         await client.query('COMMIT');
@@ -968,7 +1020,18 @@ export function createUserImplementation({
     async ResetPassword(call, callback) {
       const token = String(call.request.token ?? '');
       const newPassword = String(call.request.new_password ?? '');
-      if (!token || newPassword.length < 8 || newPassword.length > 128) {
+      if (!token) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'invalid_password'));
+        return;
+      }
+      let settings;
+      try {
+        settings = await loadSystemSettings(db);
+      } catch (error) {
+        callback(mapDbError(error));
+        return;
+      }
+      if (!passwordAllowed(newPassword, settings)) {
         callback(grpcError(status.INVALID_ARGUMENT, 'invalid_password'));
         return;
       }
@@ -1031,7 +1094,18 @@ export function createUserImplementation({
       const userId = String(call.request.user_id ?? '');
       const currentPassword = String(call.request.current_password ?? '');
       const newPassword = String(call.request.new_password ?? '');
-      if (!userId || !currentPassword || newPassword.length < 8 || newPassword.length > 128) {
+      if (!userId || !currentPassword) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'invalid_password'));
+        return;
+      }
+      let settings;
+      try {
+        settings = await loadSystemSettings(db);
+      } catch (error) {
+        callback(mapDbError(error));
+        return;
+      }
+      if (!passwordAllowed(newPassword, settings)) {
         callback(grpcError(status.INVALID_ARGUMENT, 'invalid_password'));
         return;
       }
@@ -1278,6 +1352,8 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
+        const invitationLifetimeMs = settings.invitation_days * DAY_MS;
         const existing = await findUserByEmail(client, email);
         if (existing) {
           const current = await client.query(
@@ -1301,7 +1377,7 @@ export function createUserImplementation({
                (project_id, email, role_code, invited_by_user_id, token_hash, expires_at, accepted_at)
              VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 millisecond'), now())
              RETURNING *`,
-            [projectId, email, roleCode, actorUserId, hashToken(token), INVITATION_MS],
+            [projectId, email, roleCode, actorUserId, hashToken(token), invitationLifetimeMs],
           );
           await client.query(
             `INSERT INTO access.project_memberships
@@ -1349,14 +1425,14 @@ export function createUserImplementation({
                  SET role_code = $2, invited_by_user_id = $3, token_hash = $4,
                      expires_at = now() + ($5 * interval '1 millisecond')
                  WHERE id = $1 RETURNING *`,
-                [current.rows[0].id, roleCode, actorUserId, hashToken(token), INVITATION_MS],
+                [current.rows[0].id, roleCode, actorUserId, hashToken(token), invitationLifetimeMs],
               )
             : await client.query(
                 `INSERT INTO access.invitations
                    (project_id, email, role_code, invited_by_user_id, token_hash, expires_at)
                  VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 millisecond'))
                  RETURNING *`,
-                [projectId, email, roleCode, actorUserId, hashToken(token), INVITATION_MS],
+                [projectId, email, roleCode, actorUserId, hashToken(token), invitationLifetimeMs],
               );
         await queueAuthEmail(client, {
           invitationId: invitation.rows[0].id,
@@ -1430,12 +1506,14 @@ export function createUserImplementation({
         const token = randomToken();
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
+        const invitationLifetimeMs = settings.invitation_days * DAY_MS;
         const result = await client.query(
           `UPDATE access.invitations
            SET token_hash = $2, expires_at = now() + ($3 * interval '1 millisecond'),
                invited_by_user_id = $4
            WHERE id = $1 RETURNING *`,
-          [invitationId, hashToken(token), INVITATION_MS, actorUserId],
+          [invitationId, hashToken(token), invitationLifetimeMs, actorUserId],
         );
         await queueAuthEmail(client, {
           invitationId: result.rows[0].id,
@@ -1779,6 +1857,7 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
         const result = await client.query(
           `SELECT s.*, u.status AS user_status
            FROM access.user_sessions s
@@ -1806,11 +1885,15 @@ export function createUserImplementation({
         const sessionToken = randomToken();
         const csrfToken = randomToken();
         const now = Date.now();
-        const absoluteExpiresAt = new Date(now + SESSION_ABSOLUTE_MS);
-        const idleExpiresAt = new Date(now + SESSION_IDLE_MS);
+        const absoluteExpiresAt = new Date(now + settings.session_absolute_minutes * MINUTE_MS);
+        const idleExpiresAt = new Date(now + settings.session_idle_minutes * MINUTE_MS);
+        const rememberAbsoluteMs = Math.max(
+          0,
+          new Date(session.remember_absolute_expires_at).getTime() - now,
+        );
         const rememberIdleExpiresAt = new Date(
           Math.min(
-            now + REMEMBER_IDLE_MS,
+            now + settings.remember_me_idle_days * DAY_MS,
             new Date(session.remember_absolute_expires_at).getTime(),
           ),
         );
@@ -1849,6 +1932,7 @@ export function createUserImplementation({
             rememberToken,
             csrfToken,
             remember: true,
+            rememberAbsoluteMs,
           }),
           absolute_expires_at: toTimestamp(absoluteExpiresAt),
           idle_expires_at: toTimestamp(idleExpiresAt),
@@ -1895,6 +1979,8 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
+        const settings = await loadSystemSettings(client);
+        const resetLifetimeMs = settings.password_reset_hours * HOUR_MS;
         const temporaryPassword = randomToken();
         const result = await client.query(
           `INSERT INTO access.users
@@ -1927,8 +2013,8 @@ export function createUserImplementation({
         const token = randomToken();
         await client.query(
           `INSERT INTO access.password_reset_tokens (user_id, token_hash, expires_at)
-           VALUES ($1, $2, now() + interval '1 hour')`,
-          [userId, hashToken(token)],
+           VALUES ($1, $2, now() + ($3 * interval '1 millisecond'))`,
+          [userId, hashToken(token), resetLifetimeMs],
         );
         await queueAuthEmail(client, {
           userId,
@@ -1936,7 +2022,7 @@ export function createUserImplementation({
           templateCode: 'account_activation',
           variables: { link: resetLink(publicAppUrl, token) },
           locale: String(call.request.locale ?? 'ru-RU'),
-          expiresAt: new Date(Date.now() + PASSWORD_RESET_MS),
+          expiresAt: new Date(Date.now() + resetLifetimeMs),
         });
         await client.query('COMMIT');
         await queueUserEvent(db, {
@@ -2114,23 +2200,6 @@ export function createUserImplementation({
       }
     },
 
-    async RemoveExecutorProjectLinks(call, callback) {
-      const projectId = String(call.request.project_id ?? '').trim();
-      if (!UUID_PATTERN.test(projectId)) {
-        callback(grpcError(status.INVALID_ARGUMENT, 'project_id_invalid'));
-        return;
-      }
-      try {
-        const result = await db.query(
-          'DELETE FROM access.executor_projects WHERE project_id = $1',
-          [projectId],
-        );
-        callback(null, { deleted_count: result.rowCount ?? 0 });
-      } catch (error) {
-        callback(mapDbError(error));
-      }
-    },
-
     async GetNotificationContacts(call, callback) {
       const ids = call.request.user_ids ?? [];
       try {
@@ -2158,14 +2227,19 @@ export function createUserImplementation({
 
     async CreateTelegramLinkCode(call, callback) {
       const userId = String(call.request.user_id ?? '');
-      const code = randomToken().slice(0, 16);
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-      telegramCodes.set(code, { userId, expiresAt });
-      callback(null, {
-        code,
-        deep_link: `https://t.me/rp_gant_local_bot?start=${code}`,
-        expires_at: toTimestamp(expiresAt),
-      });
+      try {
+        const settings = await loadSystemSettings(db);
+        const code = randomToken().slice(0, 16);
+        const expiresAt = new Date(Date.now() + settings.telegram_link_code_minutes * MINUTE_MS);
+        telegramCodes.set(code, { userId, expiresAt });
+        callback(null, {
+          code,
+          deep_link: `https://t.me/rp_gant_local_bot?start=${code}`,
+          expires_at: toTimestamp(expiresAt),
+        });
+      } catch (error) {
+        callback(mapDbError(error));
+      }
     },
 
     async LinkTelegram(call, callback) {
@@ -2220,26 +2294,81 @@ export function createUserImplementation({
         callback(grpcError(status.PERMISSION_DENIED, 'admin_forbidden'));
         return;
       }
+      const items = call.request.items ?? [];
+      const seenKeys = new Set();
+      for (const item of items) {
+        if (
+          !item ||
+          typeof item.key !== 'string' ||
+          !Object.hasOwn(SYSTEM_SETTING_RULES, item.key)
+        ) {
+          callback(grpcError(status.INVALID_ARGUMENT, 'system_setting_unknown'));
+          return;
+        }
+        if (seenKeys.has(item.key)) {
+          callback(grpcError(status.INVALID_ARGUMENT, 'system_setting_duplicate'));
+          return;
+        }
+        seenKeys.add(item.key);
+      }
+
+      let client;
       try {
-        for (const item of call.request.items ?? []) {
-          await db.query(
+        client = await db.connect();
+        await client.query('BEGIN');
+        const current = await client.query(
+          'SELECT key, value, description FROM settings.system_settings ORDER BY key FOR UPDATE',
+        );
+        const previousValues = settingsFromRows(current.rows);
+        const nextValues = { ...previousValues };
+        const valuesByKey = new Map();
+        for (const item of items) {
+          const value = storedSettingsValue(item.value);
+          valuesByKey.set(item.key, value);
+          nextValues[item.key] = value;
+        }
+        const validationError = validateSystemSettings(nextValues);
+        if (validationError) {
+          await client.query('ROLLBACK');
+          callback(grpcError(status.INVALID_ARGUMENT, validationError));
+          return;
+        }
+
+        const rowsByKey = new Map(current.rows.map((row) => [row.key, row]));
+        const changedKeys = [];
+        for (const item of items) {
+          const value = valuesByKey.get(item.key);
+          if (Object.is(previousValues[item.key], value)) continue;
+          const description = rowsByKey.get(item.key)?.description ?? item.description ?? '';
+          await client.query(
             `INSERT INTO settings.system_settings (key, value, description, updated_by_user_id)
              VALUES ($1, $2::jsonb, $3, $4)
              ON CONFLICT (key) DO UPDATE
-               SET value = $2::jsonb, description = $3, updated_by_user_id = $4,
-                   updated_at = now()`,
-            [
-              item.key,
-              JSON.stringify(storedSettingsValue(item.value)),
-              item.description ?? '',
-              actorUserId,
-            ],
+               SET value = $2::jsonb, description = EXCLUDED.description,
+                   updated_by_user_id = $4, updated_at = now()`,
+            [item.key, JSON.stringify(value), description, actorUserId],
           );
+          changedKeys.push(item.key);
         }
-        const result = await db.query('SELECT * FROM settings.system_settings ORDER BY key');
+        if (changedKeys.length) {
+          await queueUserEvent(client, {
+            aggregateType: 'settings',
+            aggregateId: actorUserId,
+            eventType: 'settings.updated',
+            actorUserId,
+            entityType: 'settings',
+            entityId: actorUserId,
+            payload: { keys: changedKeys, actorUserId },
+          });
+        }
+        const result = await client.query('SELECT * FROM settings.system_settings ORDER BY key');
+        await client.query('COMMIT');
         callback(null, { items: result.rows.map(toSettings) });
       } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         callback(mapDbError(error));
+      } finally {
+        client?.release();
       }
     },
 
@@ -2260,192 +2389,6 @@ export function createUserImplementation({
         callback(null, { user: toUser(result.rows[0], roles) });
       } catch (error) {
         callback(mapDbError(error));
-      }
-    },
-
-    async CreateExecutor(call, callback) {
-      const actorUserId = String(call.request.actor_user_id ?? '');
-      const lastName = String(call.request.last_name ?? '').trim();
-      const firstName = String(call.request.first_name ?? '').trim();
-      const middleName = String(call.request.middle_name ?? '').trim();
-      const position = String(call.request.position ?? '').trim();
-      const projectIds = normalizeExecutorProjectIds(call.request.project_ids);
-      if (!lastName || !firstName) {
-        callback(grpcError(status.INVALID_ARGUMENT, 'executor_name_required'));
-        return;
-      }
-      if (!projectIds) {
-        callback(grpcError(status.INVALID_ARGUMENT, 'executor_projects_required'));
-        return;
-      }
-      if (!(await canManageExecutors(db, actorUserId))) {
-        callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
-        return;
-      }
-      let client;
-      try {
-        client = await db.connect();
-        await client.query('BEGIN');
-        const fullName = [lastName, firstName, middleName].filter(Boolean).join(' ');
-        const result = await client.query(
-          `INSERT INTO access.executors (last_name, first_name, middle_name, full_name, position)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [lastName, firstName, middleName || null, fullName, position || null],
-        );
-        const executorId = result.rows[0].id;
-        for (const projectId of projectIds) {
-          await client.query(
-            'INSERT INTO access.executor_projects (executor_id, project_id) VALUES ($1, $2)',
-            [executorId, projectId],
-          );
-        }
-        const executor = await getExecutorWithProjects(client, executorId);
-        await client.query('COMMIT');
-        await queueUserEvent(db, {
-          aggregateType: 'executor',
-          aggregateId: executorId,
-          eventType: 'executor.created',
-          actorUserId,
-          entityType: 'executor',
-          entityId: executorId,
-          payload: { executorId, projectIds },
-        }).catch(() => {});
-        callback(null, { executor: toExecutor(executor) });
-      } catch (error) {
-        if (client) await client.query('ROLLBACK').catch(() => {});
-        callback(mapDbError(error));
-      } finally {
-        client?.release();
-      }
-    },
-
-    async UpdateExecutor(call, callback) {
-      const executorId = String(call.request.executor_id ?? '');
-      const actorUserId = String(call.request.actor_user_id ?? '');
-      const updateProjectIds = Boolean(call.request.update_project_ids);
-      const projectIds = updateProjectIds
-        ? normalizeExecutorProjectIds(call.request.project_ids)
-        : null;
-      if (updateProjectIds && !projectIds) {
-        callback(grpcError(status.INVALID_ARGUMENT, 'executor_projects_required'));
-        return;
-      }
-      if (!(await canManageExecutors(db, actorUserId))) {
-        callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
-        return;
-      }
-      let client;
-      try {
-        client = await db.connect();
-        await client.query('BEGIN');
-        const current = await client.query(
-          'SELECT * FROM access.executors WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
-          [executorId],
-        );
-        if (current.rowCount === 0) {
-          await client.query('ROLLBACK');
-          callback(grpcError(status.NOT_FOUND, 'executor_not_found'));
-          return;
-        }
-        const row = current.rows[0];
-        const lastName = String(call.request.last_name ?? row.last_name).trim();
-        const firstName = String(call.request.first_name ?? row.first_name).trim();
-        const middleName = String(call.request.middle_name ?? row.middle_name ?? '').trim();
-        const position = String(call.request.position ?? row.position ?? '').trim();
-        if (!lastName || !firstName) {
-          await client.query('ROLLBACK');
-          callback(grpcError(status.INVALID_ARGUMENT, 'executor_name_required'));
-          return;
-        }
-        const fullName = [lastName, firstName, middleName].filter(Boolean).join(' ');
-        await client.query(
-          `UPDATE access.executors
-           SET last_name = $2, first_name = $3, middle_name = $4, full_name = $5,
-               position = $6, updated_at = now()
-           WHERE id = $1`,
-          [executorId, lastName, firstName, middleName || null, fullName, position || null],
-        );
-        if (updateProjectIds) {
-          await client.query('DELETE FROM access.executor_projects WHERE executor_id = $1', [
-            executorId,
-          ]);
-          for (const projectId of projectIds) {
-            await client.query(
-              'INSERT INTO access.executor_projects (executor_id, project_id) VALUES ($1, $2)',
-              [executorId, projectId],
-            );
-          }
-        }
-        const projectCount = await client.query(
-          'SELECT count(*)::int AS total FROM access.executor_projects WHERE executor_id = $1',
-          [executorId],
-        );
-        if (projectCount.rows[0].total === 0) {
-          await client.query('ROLLBACK');
-          callback(grpcError(status.INVALID_ARGUMENT, 'executor_projects_required'));
-          return;
-        }
-        const executor = await getExecutorWithProjects(client, executorId);
-        await client.query('COMMIT');
-        await queueUserEvent(db, {
-          aggregateType: 'executor',
-          aggregateId: executorId,
-          eventType: 'executor.updated',
-          actorUserId,
-          entityType: 'executor',
-          entityId: executorId,
-          payload: { executorId, projectIds: executor.project_ids },
-        }).catch(() => {});
-        callback(null, { executor: toExecutor(executor) });
-      } catch (error) {
-        if (client) await client.query('ROLLBACK').catch(() => {});
-        callback(mapDbError(error));
-      } finally {
-        client?.release();
-      }
-    },
-
-    async DeleteExecutor(call, callback) {
-      const executorId = String(call.request.executor_id ?? '');
-      const actorUserId = String(call.request.actor_user_id ?? '');
-      if (!(await canManageExecutors(db, actorUserId))) {
-        callback(grpcError(status.PERMISSION_DENIED, 'executor_manage_forbidden'));
-        return;
-      }
-      let client;
-      try {
-        client = await db.connect();
-        await client.query('BEGIN');
-        const result = await client.query(
-          `UPDATE access.executors
-           SET deleted_at = now(), is_active = false, updated_at = now()
-           WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
-          [executorId],
-        );
-        if (result.rowCount === 0) {
-          await client.query('ROLLBACK');
-          callback(grpcError(status.NOT_FOUND, 'executor_not_found'));
-          return;
-        }
-        await client.query('DELETE FROM access.executor_projects WHERE executor_id = $1', [
-          executorId,
-        ]);
-        await client.query('COMMIT');
-        await queueUserEvent(db, {
-          aggregateType: 'executor',
-          aggregateId: executorId,
-          eventType: 'executor.deleted',
-          actorUserId,
-          entityType: 'executor',
-          entityId: executorId,
-          payload: { executorId },
-        }).catch(() => {});
-        callback(null, { deleted: true });
-      } catch (error) {
-        if (client) await client.query('ROLLBACK').catch(() => {});
-        callback(mapDbError(error));
-      } finally {
-        client?.release();
       }
     },
 
@@ -2489,54 +2432,6 @@ export function createUserImplementation({
       }
     },
 
-    async ListExecutors(call, callback) {
-      const query = String(call.request.query ?? '').trim();
-      const includeInactive = Boolean(call.request.include_inactive);
-      const projectId = String(call.request.project_id ?? '').trim();
-      const limit = Math.min(Math.max(Number(call.request.page?.limit ?? 50), 1), 200);
-      const offset = Math.max(Number(call.request.page?.offset ?? 0), 0);
-      if (projectId && !UUID_PATTERN.test(projectId)) {
-        callback(grpcError(status.INVALID_ARGUMENT, 'project_id_invalid'));
-        return;
-      }
-      try {
-        const result = await db.query(
-          `SELECT e.*,
-                  COALESCE(array_agg(ep.project_id ORDER BY ep.project_id) FILTER (WHERE ep.project_id IS NOT NULL), '{}') AS project_ids
-           FROM access.executors e
-           LEFT JOIN access.executor_projects ep ON ep.executor_id = e.id
-           WHERE e.deleted_at IS NULL
-             AND ($1 = '' OR e.full_name ILIKE '%' || $1 || '%')
-             AND ($2 OR e.is_active)
-             AND ($3::uuid IS NULL OR EXISTS (
-               SELECT 1 FROM access.executor_projects filter_ep
-               WHERE filter_ep.executor_id = e.id AND filter_ep.project_id = $3::uuid
-             ))
-           GROUP BY e.id
-           ORDER BY e.full_name ASC
-           LIMIT $4 OFFSET $5`,
-          [query, includeInactive, projectId || null, limit, offset],
-        );
-        const count = await db.query(
-          `SELECT count(*)::int AS total FROM access.executors e
-           WHERE e.deleted_at IS NULL
-             AND ($1 = '' OR e.full_name ILIKE '%' || $1 || '%')
-             AND ($2 OR e.is_active)
-             AND ($3::uuid IS NULL OR EXISTS (
-               SELECT 1 FROM access.executor_projects filter_ep
-               WHERE filter_ep.executor_id = e.id AND filter_ep.project_id = $3::uuid
-             ))`,
-          [query, includeInactive, projectId || null],
-        );
-        callback(null, {
-          items: result.rows.map(toExecutor),
-          page: { total: count.rows[0].total, limit, offset },
-        });
-      } catch (error) {
-        callback(mapDbError(error));
-      }
-    },
-
     async GetUsersByIds(call, callback) {
       const ids = call.request.user_ids ?? [];
       if (ids.length === 0) {
@@ -2566,29 +2461,6 @@ export function createUserImplementation({
       }
     },
 
-    async GetExecutorsByIds(call, callback) {
-      const ids = call.request.executor_ids ?? [];
-      if (ids.length === 0) {
-        callback(null, { items: [] });
-        return;
-      }
-      try {
-        const result = await db.query(
-          `SELECT e.*,
-                  COALESCE(array_agg(ep.project_id ORDER BY ep.project_id) FILTER (WHERE ep.project_id IS NOT NULL), '{}') AS project_ids
-           FROM access.executors e
-           LEFT JOIN access.executor_projects ep ON ep.executor_id = e.id
-           WHERE e.id = ANY($1::uuid[]) AND e.deleted_at IS NULL
-           GROUP BY e.id
-           ORDER BY e.full_name ASC`,
-          [ids],
-        );
-        callback(null, { items: result.rows.map(toExecutor) });
-      } catch (error) {
-        callback(mapDbError(error));
-      }
-    },
-
     async ValidateSession(call, callback) {
       const sessionToken = String(call.request.session_token ?? '');
       if (!sessionToken) {
@@ -2611,6 +2483,7 @@ export function createUserImplementation({
         }
 
         const session = result.rows[0];
+        const settings = await loadSystemSettings(db);
         const now = new Date();
         if (
           new Date(session.absolute_expires_at) <= now ||
@@ -2640,7 +2513,9 @@ export function createUserImplementation({
 
         let idleExpiresAt = new Date(session.idle_expires_at);
         if (call.request.extend_idle !== false) {
-          const idleMs = session.remember_token_hash ? REMEMBER_IDLE_MS : SESSION_IDLE_MS;
+          const idleMs = session.remember_token_hash
+            ? settings.remember_me_idle_days * DAY_MS
+            : settings.session_idle_minutes * MINUTE_MS;
           idleExpiresAt = new Date(
             Math.min(now.getTime() + idleMs, new Date(session.absolute_expires_at).getTime()),
           );
@@ -2649,7 +2524,12 @@ export function createUserImplementation({
           ).getTime();
           const rememberIdleExpiresAt =
             session.remember_token_hash && Number.isFinite(rememberAbsoluteExpiresAt)
-              ? new Date(Math.min(now.getTime() + REMEMBER_IDLE_MS, rememberAbsoluteExpiresAt))
+              ? new Date(
+                  Math.min(
+                    now.getTime() + settings.remember_me_idle_days * DAY_MS,
+                    rememberAbsoluteExpiresAt,
+                  ),
+                )
               : null;
           await db.query(
             `UPDATE access.user_sessions
