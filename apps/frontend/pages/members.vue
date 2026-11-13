@@ -1,4 +1,8 @@
 <script setup>
+import { availableProjectUsers, pendingProjectInvitations } from '~/utils/members.js';
+
+const PAGE_SIZE = 200;
+const MIN_USER_SEARCH_LENGTH = 2;
 const projects = ref([]);
 const currentUser = ref(null);
 const unreadCount = ref(0);
@@ -12,7 +16,29 @@ watch(error, (value) => {
 });
 
 const loading = ref(true);
-const form = ref({ email: '', role: 'editor' });
+const membersLoading = ref(false);
+const form = ref({ userId: '', role: 'editor' });
+const selectedUser = ref(null);
+const userSearchResults = ref([]);
+const userSearchLoading = ref(false);
+const pendingInvitations = computed(() =>
+  pendingProjectInvitations(invitations.value, members.value),
+);
+const projectOptions = computed(() =>
+  projects.value.map((project) => ({ value: project.id, label: project.name })),
+);
+const availableUserOptions = computed(() =>
+  availableProjectUsers(userSearchResults.value, members.value, invitations.value).map((user) => ({
+    value: user.id,
+    label: user.displayName || user.email,
+    description: [user.email, user.position].filter(Boolean).join(' · '),
+    user,
+  })),
+);
+
+let membersRequestId = 0;
+let userSearchRequestId = 0;
+let userSearchTimer;
 
 function csrfToken() {
   return document.cookie
@@ -37,6 +63,26 @@ async function api(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
+async function loadAllPages(path, filters = {}) {
+  const items = [];
+  let offset = 0;
+  let total = Infinity;
+  while (offset < total) {
+    const query = new URLSearchParams({
+      ...filters,
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+    });
+    const response = await api(`${path}?${query}`);
+    const pageItems = response.items ?? [];
+    items.push(...pageItems);
+    total = Number(response.page?.total ?? items.length);
+    if (!pageItems.length) break;
+    offset += pageItems.length;
+  }
+  return items;
+}
+
 function initials(name) {
   return String(name || 'Пользователь')
     .trim()
@@ -57,12 +103,25 @@ function roleLabel(role) {
   }[role] ?? role;
 }
 
+function resetUserSearch() {
+  userSearchRequestId += 1;
+  clearTimeout(userSearchTimer);
+  userSearchResults.value = [];
+  userSearchLoading.value = false;
+}
+
+function clearUserSelection() {
+  form.value = { userId: '', role: 'editor' };
+  selectedUser.value = null;
+  resetUserSearch();
+}
+
 async function loadProject() {
   loading.value = true;
   try {
     const session = await api('/auth/session');
     currentUser.value = session?.user ?? session;
-    projects.value = (await api('/projects?limit=100')).items ?? [];
+    projects.value = await loadAllPages('/projects');
     unreadCount.value = (await api('/notifications/unread-count').catch(() => ({ count: 0 }))).count ?? 0;
     const query = new URLSearchParams(window.location.search).get('project');
     projectId.value = query || projects.value[0]?.id || '';
@@ -75,15 +134,72 @@ async function loadProject() {
 }
 
 async function loadMembers() {
-  if (!projectId.value) return;
-  const [memberResult, invitationResult] = await Promise.allSettled([
-    api(`/projects/${projectId.value}/members?limit=200`),
-    api(`/projects/${projectId.value}/invitations?limit=200`),
-  ]);
-  if (memberResult.status === 'rejected') throw memberResult.reason;
-  members.value = memberResult.value.items ?? [];
-  invitations.value =
-    invitationResult.status === 'fulfilled' ? (invitationResult.value.items ?? []) : [];
+  const requestedProjectId = projectId.value;
+  const requestId = ++membersRequestId;
+  if (!requestedProjectId) {
+    members.value = [];
+    invitations.value = [];
+    membersLoading.value = false;
+    return;
+  }
+  membersLoading.value = true;
+  try {
+    const [memberResult, invitationResult] = await Promise.allSettled([
+      loadAllPages(`/projects/${requestedProjectId}/members`),
+      loadAllPages(`/projects/${requestedProjectId}/invitations`),
+    ]);
+    if (requestId !== membersRequestId || requestedProjectId !== projectId.value) return;
+    if (memberResult.status === 'rejected') throw memberResult.reason;
+    members.value = memberResult.value;
+    invitations.value = invitationResult.status === 'fulfilled' ? invitationResult.value : [];
+  } finally {
+    if (requestId === membersRequestId) membersLoading.value = false;
+  }
+}
+
+async function changeProject(value) {
+  if (String(value ?? '') === projectId.value) return;
+  projectId.value = String(value ?? '');
+  members.value = [];
+  invitations.value = [];
+  clearUserSelection();
+  error.value = '';
+  try {
+    await loadMembers();
+  } catch (reason) {
+    error.value = reason.message;
+  }
+}
+
+function searchAvailableUsers(value) {
+  resetUserSearch();
+  const query = String(value ?? '').trim();
+  if (query && selectedUser.value) {
+    selectedUser.value = null;
+    form.value.userId = '';
+  }
+  if (query.length < MIN_USER_SEARCH_LENGTH || !projectId.value) return;
+
+  const requestId = userSearchRequestId;
+  const requestedProjectId = projectId.value;
+  userSearchLoading.value = true;
+  userSearchTimer = setTimeout(async () => {
+    try {
+      const results = await loadAllPages('/users', { query });
+      if (requestId === userSearchRequestId && requestedProjectId === projectId.value) {
+        userSearchResults.value = results;
+      }
+    } catch (reason) {
+      if (requestId === userSearchRequestId) error.value = reason.message;
+    } finally {
+      if (requestId === userSearchRequestId) userSearchLoading.value = false;
+    }
+  }, 250);
+}
+
+function selectUser(option) {
+  selectedUser.value = option.user;
+  form.value = { ...form.value, userId: String(option.value) };
 }
 
 async function run(action) {
@@ -97,12 +213,17 @@ async function run(action) {
 }
 
 async function invite() {
+  const user = selectedUser.value;
+  if (!user) {
+    error.value = 'Сначала выберите участника из списка.';
+    return;
+  }
   await run(async () => {
     await api(`/projects/${projectId.value}/invitations`, {
       method: 'POST',
-      body: form.value,
+      body: { email: user.email, role: form.value.role },
     });
-    form.value = { email: '', role: 'editor' };
+    clearUserSelection();
   });
 }
 
@@ -142,6 +263,7 @@ async function logout() {
   }
 }
 
+onBeforeUnmount(() => clearTimeout(userSearchTimer));
 onMounted(loadProject);
 </script>
 
@@ -158,36 +280,60 @@ onMounted(loadProject);
           <h1 class="page-title">Участники</h1>
           <p class="page-subtitle">Управляйте доступом и приглашениями в проект.</p>
         </div>
-        <label class="project-picker">
-          <span>Проект</span>
-          <select v-model="projectId" class="input" aria-label="Выбрать проект" @change="loadMembers">
-            <option v-for="project in projects" :key="project.id" :value="project.id">
-              {{ project.name }}
-            </option>
-          </select>
-        </label>
+        <SearchableSelect
+          id="project-select"
+          class="project-picker"
+          label="Проект"
+          :model-value="projectId"
+          :options="projectOptions"
+          placeholder="Найти проект"
+          search-placeholder="Введите название проекта"
+          empty-text="Проекты не найдены."
+          @update:model-value="changeProject"
+        />
       </header>
 
       <p v-if="loading" class="loading-state">Загрузка участников...</p>
       <div v-else-if="!projectId" class="card empty-state">Нет доступных проектов.</div>
+      <p v-else-if="membersLoading" class="card empty-state" role="status">Загружаем состав проекта…</p>
       <div v-else class="members-content">
         <section class="card members-card invite-card">
           <div class="section-heading">
             <div>
               <p class="eyebrow">Новый доступ</p>
               <h2>Добавить участника</h2>
-              <p class="section-description">Участник получит приглашение на электронную почту.</p>
+              <p class="section-description">Выберите активный аккаунт с подтверждённым email.</p>
             </div>
           </div>
           <form class="inline invite-form" @submit.prevent="invite">
-            <input v-model="form.email" class="input" type="email" placeholder="Email" required />
-            <select v-model="form.role" class="input">
-              <option value="manager">Менеджер</option>
-              <option value="editor">Редактор</option>
-              <option value="participant">Участник</option>
-              <option value="viewer">Наблюдатель</option>
-            </select>
-            <button class="btn btn-primary" type="submit">Добавить или пригласить</button>
+            <SearchableSelect
+              id="available-user-select"
+              label="Участник"
+              :model-value="form.userId"
+              :options="availableUserOptions"
+              :loading="userSearchLoading"
+              :remote="true"
+              :min-search-length="MIN_USER_SEARCH_LENGTH"
+              min-search-text="Введите не менее двух символов имени или email."
+              search-placeholder="Имя или email"
+              empty-text="Доступные участники не найдены."
+              placeholder="Поиск участника"
+              @search="searchAvailableUsers"
+              @update:model-value="form.userId = String($event)"
+              @select="selectUser"
+            />
+            <label class="member-role-field">
+              <span>Роль в проекте</span>
+              <select id="member-role" v-model="form.role" class="input">
+                <option value="manager">Менеджер</option>
+                <option value="editor">Редактор</option>
+                <option value="participant">Участник</option>
+                <option value="viewer">Наблюдатель</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" type="submit" :disabled="!selectedUser || userSearchLoading">
+              Добавить участника
+            </button>
           </form>
         </section>
 
@@ -228,26 +374,26 @@ onMounted(loadProject);
           <div class="section-heading section-heading-row">
             <div>
               <p class="eyebrow">Ожидают ответа</p>
-              <h2>Приглашения <span class="count-badge">{{ invitations.length }}</span></h2>
+              <h2>Приглашения <span class="count-badge">{{ pendingInvitations.length }}</span></h2>
             </div>
           </div>
-          <div v-if="invitations.length" class="list">
-            <div v-for="invitation in invitations" :key="invitation.id" class="list-item">
+          <div v-if="pendingInvitations.length" class="list">
+            <div v-for="invitation in pendingInvitations" :key="invitation.id" class="list-item">
               <div class="member-identity">
                 <span class="avatar invitation-avatar" aria-hidden="true">✉</span>
                 <span class="member-copy">
                   <strong>{{ invitation.email }}</strong>
                   <span>{{ roleLabel(invitation.role) }}</span>
                 </span>
-                <span class="badge badge-neutral">{{ invitation.status }}</span>
+                <span class="badge badge-neutral">Ожидает ответа</span>
               </div>
-              <div v-if="invitation.status === 'pending'" class="actions">
+              <div class="actions">
                 <button class="btn btn-secondary btn-sm" type="button" @click="resendInvitation(invitation)">Отправить снова</button>
                 <button class="btn btn-ghost btn-sm" type="button" @click="revokeInvitation(invitation)">Отозвать</button>
               </div>
             </div>
           </div>
-          <p v-else class="empty-state">Активных приглашений нет.</p>
+          <p v-else class="empty-state">Ожидающих приглашений нет.</p>
         </section>
       </div>
     </main>
@@ -318,8 +464,17 @@ onMounted(loadProject);
 
 .invite-form {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 190px auto;
+  grid-template-columns: minmax(240px, 1fr) 190px auto;
+  align-items: end;
   gap: 10px;
+}
+
+.member-role-field {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 650;
 }
 
 .list {
@@ -409,6 +564,10 @@ onMounted(loadProject);
 
   .invite-form {
     grid-template-columns: 1fr;
+  }
+
+  .invite-form > button {
+    justify-self: stretch;
   }
 
   .list-item {

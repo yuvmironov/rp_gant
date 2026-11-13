@@ -809,265 +809,6 @@
         }
       }
     },
-    "/executors": {
-      "get": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "listExecutors",
-        "summary": "Каталог исполнителей",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Offset"
-          },
-          {
-            "name": "query",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "includeInactive",
-            "in": "query",
-            "schema": {
-              "type": "boolean",
-              "default": false
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "description": "Ограничить каталог исполнителями, доступными в проекте",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Исполнители",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "items",
-                    "page"
-                  ],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Executor"
-                      }
-                    },
-                    "page": {
-                      "$ref": "#/components/schemas/PageMeta"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "createExecutor",
-        "summary": "Создать исполнителя",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "lastName",
-                  "firstName",
-                  "projectIds"
-                ],
-                "properties": {
-                  "lastName": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "firstName": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "middleName": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "position": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "projectIds": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Создан",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Executor"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          }
-        }
-      }
-    },
-    "/executors/{executorId}": {
-      "patch": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "updateExecutor",
-        "summary": "Изменить исполнителя",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ExecutorId"
-          },
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "lastName": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "firstName": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "middleName": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "position": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "projectIds": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  }
-                },
-                "required": [
-                  "projectIds"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Изменен",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Executor"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Executors"
-        ],
-        "operationId": "deleteExecutor",
-        "summary": "Удалить исполнителя",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ExecutorId"
-          },
-          {
-            "$ref": "#/components/parameters/CsrfToken"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Удален"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/projects": {
       "get": {
         "tags": [
@@ -4508,15 +4249,6 @@
           "format": "uuid"
         }
       },
-      "ExecutorId": {
-        "name": "executorId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "format": "uuid"
-        }
-      },
       "ProjectId": {
         "name": "projectId",
         "in": "path",
@@ -4780,8 +4512,7 @@
       "AssigneeType": {
         "type": "string",
         "enum": [
-          "user",
-          "executor"
+          "user"
         ]
       },
       "ImportFormat": {
@@ -5025,56 +4756,6 @@
           }
         }
       },
-      "Executor": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "lastName": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "firstName": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "middleName": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "fullName": {
-            "type": "string"
-          },
-          "position": {
-            "type": "string"
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "projectIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        },
-        "required": [
-          "lastName",
-          "firstName",
-          "projectIds"
-        ]
-      },
       "ProjectMembership": {
         "type": "object",
         "properties": {
@@ -5293,10 +4974,6 @@
           },
           "displayName": {
             "type": "string"
-          },
-          "linkedUserId": {
-            "type": "string",
-            "format": "uuid"
           },
           "resolved": {
             "type": "boolean"
@@ -6842,10 +6519,6 @@
           },
           "displayName": {
             "type": "string"
-          },
-          "linkedUserId": {
-            "type": "string",
-            "format": "uuid"
           },
           "resolved": {
             "type": "boolean"

@@ -12,9 +12,51 @@ test('admin can create admins and promote users', async ({ page }) => {
   await expect(page.locator('.projects-page')).toBeVisible();
 
   await page.goto('/admin');
-  await expect(page.locator('.executor-project-picker')).toContainText(
-    'Эта привязка управляет только видимостью записи каталога',
+  await expect(page.getByRole('heading', { name: 'Администрирование' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Пользователи' })).toBeVisible();
+  const tabs = page.getByRole('tablist', { name: 'Разделы администрирования' });
+  await expect(tabs.getByRole('tab')).toHaveCount(3);
+  await expect(tabs.getByRole('tab', { name: /Пользователи/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
   );
+  await expect(page.getByText('Каталог исполнителей')).toHaveCount(0);
+
+  await tabs.getByRole('tab', { name: /Журнал аудита/ }).click();
+  await expect(page.getByRole('heading', { name: 'Журнал аудита' })).toBeVisible();
+  await tabs.getByRole('tab', { name: /Конфигурация/ }).click();
+  await expect(page.getByRole('heading', { name: 'Системные настройки' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Парольная политика' })).toBeVisible();
+  await expect(page.locator('#setting-password_min_length')).toHaveValue(/\d+/);
+  await expect(page.locator('#setting-password_max_length')).toHaveValue(/\d+/);
+  await expect(page.getByRole('heading', { name: 'Защита входа' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Сессии и «Запомнить меня»' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ссылки и коды подтверждения' })).toBeVisible();
+  await page.locator('#setting-password_min_length').fill('200');
+  await page.locator('#setting-password_max_length').fill('100');
+  await page.getByRole('button', { name: 'Сохранить конфигурацию' }).click();
+  await expect(page.locator('#setting-password_min_length-error')).toBeVisible();
+  await expect(page.locator('#setting-password_max_length-error')).toBeVisible();
+  await page.getByRole('button', { name: 'Отменить изменения' }).click();
+
+  const maxPasswordLength = page.locator('#setting-password_max_length');
+  const originalMaxPasswordLength = Number(await maxPasswordLength.inputValue());
+  const updatedMaxPasswordLength =
+    originalMaxPasswordLength === 1024
+      ? originalMaxPasswordLength - 1
+      : originalMaxPasswordLength + 1;
+  page.on('dialog', (dialog) => dialog.accept());
+  for (const value of [updatedMaxPasswordLength, originalMaxPasswordLength]) {
+    await maxPasswordLength.fill(String(value));
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/v1/settings') && response.request().method() === 'PUT',
+    );
+    await page.getByRole('button', { name: 'Сохранить конфигурацию' }).click();
+    expect((await saveResponse).status()).toBe(200);
+    await expect(maxPasswordLength).toHaveValue(String(value));
+  }
+  await tabs.getByRole('tab', { name: /Пользователи/ }).click();
   const userForm = page
     .locator('form.inline')
     .filter({ has: page.locator('input[placeholder=Email]') });

@@ -77,7 +77,7 @@ curl -fsS https://sync.rp-gant.ru/health/live
 ## Последний rollout
 
 - Release: `6643a1a` (`PR #155`), 2026-11-12; staging acceptance подтверждена владельцем.
-- `db-init` успешно применил миграции, включая user `0004_executor_projects` и project `0008_assignment_roles_by_entity`; все пять service DB присутствуют.
+- `db-init` применяет project guard `0009_user_only_task_assignments` до user `0005_remove_executor_catalog`; все пять service DB присутствуют.
 - Backfill: dry-run просканировал 0 назначений; apply выполнил 0 обновлений и 0 удалений.
 - Все app containers проверены; внешние app и Sync health endpoints вернули 200, Sync `/health/live` и `/health/ready` отвечают `ok`/`ready`.
 - Pre-migration полный PostgreSQL backup: `/opt/rp-gant-backups/rp-gant-pre-assignments-9f43bcc.sql` (5 DB, 690533 bytes, mode `0600`). Изолированный restore drill прошёл на том же VPS.

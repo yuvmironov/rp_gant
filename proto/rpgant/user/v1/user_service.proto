@@ -37,7 +37,6 @@ service UserService {
   rpc ListAccessibleProjectIds(ListAccessibleProjectIdsRequest) returns (ListAccessibleProjectIdsResponse);
   rpc GetProjectAccess(GetProjectAccessRequest) returns (GetProjectAccessResponse);
   rpc GetActiveProjectMemberIds(GetActiveProjectMemberIdsRequest) returns (GetActiveProjectMemberIdsResponse);
-  rpc RemoveExecutorProjectLinks(RemoveExecutorProjectLinksRequest) returns (RemoveExecutorProjectLinksResponse);
   rpc CheckProjectPermission(CheckProjectPermissionRequest) returns (CheckProjectPermissionResponse);
   rpc EnsureProjectOwner(EnsureProjectOwnerRequest) returns (EnsureProjectOwnerResponse);
   rpc SetProjectOwnerMembership(SetProjectOwnerMembershipRequest) returns (SetProjectOwnerMembershipResponse);
@@ -49,18 +48,6 @@ service UserService {
   rpc RevokeInvitation(RevokeInvitationRequest) returns (RevokeInvitationResponse);
   rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
   rpc ListProjectInvitations(ListProjectInvitationsRequest) returns (ListProjectInvitationsResponse);
-  rpc ListExecutors(ListExecutorsRequest) returns (ListExecutorsResponse);
-  rpc GetExecutorsByIds(GetExecutorsByIdsRequest) returns (GetExecutorsByIdsResponse);
-  rpc CreateExecutor(CreateExecutorRequest) returns (CreateExecutorResponse);
-  rpc UpdateExecutor(UpdateExecutorRequest) returns (UpdateExecutorResponse);
-  rpc DeleteExecutor(DeleteExecutorRequest) returns (DeleteExecutorResponse);
-  // Deprecated wire-compatibility methods. The server responds UNIMPLEMENTED.
-  rpc LinkExecutorUser(LinkExecutorUserRequest) returns (LinkExecutorUserResponse) {
-    option deprecated = true;
-  }
-  rpc UnlinkExecutorUser(UnlinkExecutorUserRequest) returns (UnlinkExecutorUserResponse) {
-    option deprecated = true;
-  }
   rpc GetNotificationContacts(GetNotificationContactsRequest) returns (GetNotificationContactsResponse);
   rpc CreateTelegramLinkCode(CreateTelegramLinkCodeRequest) returns (CreateTelegramLinkCodeResponse);
   rpc LinkTelegram(LinkTelegramRequest) returns (LinkTelegramResponse);
@@ -133,21 +120,6 @@ message Invitation {
   google.protobuf.Timestamp accepted_at = 7;
   google.protobuf.Timestamp revoked_at = 8;
   string invited_by_user_id = 9;
-}
-
-message Executor {
-  string id = 1;
-  string last_name = 2;
-  string first_name = 3;
-  string middle_name = 4;
-  string full_name = 5;
-  string position = 6;
-  string linked_user_id = 7 [deprecated = true];
-  UserSummary linked_user = 8 [deprecated = true];
-  bool is_active = 9;
-  google.protobuf.Timestamp created_at = 10;
-  google.protobuf.Timestamp updated_at = 11;
-  repeated string project_ids = 12;
 }
 
 message Role {
@@ -482,14 +454,6 @@ message GetActiveProjectMemberIdsResponse {
   repeated string user_ids = 1;
 }
 
-message RemoveExecutorProjectLinksRequest {
-  string project_id = 1;
-}
-
-message RemoveExecutorProjectLinksResponse {
-  int32 deleted_count = 1;
-}
-
 message CheckProjectPermissionRequest {
   string user_id = 1;
   string project_id = 2;
@@ -598,87 +562,6 @@ message ListProjectInvitationsRequest {
 message ListProjectInvitationsResponse {
   repeated Invitation items = 1;
   rpgant.common.v1.PageResponse page = 2;
-}
-
-message ListExecutorsRequest {
-  rpgant.common.v1.PageRequest page = 1;
-  string query = 2;
-  bool include_inactive = 3;
-  string project_id = 4;
-}
-
-message ListExecutorsResponse {
-  repeated Executor items = 1;
-  rpgant.common.v1.PageResponse page = 2;
-}
-
-message GetExecutorsByIdsRequest {
-  repeated string executor_ids = 1;
-}
-
-message GetExecutorsByIdsResponse {
-  repeated Executor items = 1;
-}
-
-message CreateExecutorRequest {
-  string last_name = 1;
-  string first_name = 2;
-  string middle_name = 3;
-  string position = 4;
-  string actor_user_id = 5;
-  repeated string project_ids = 6;
-}
-
-message CreateExecutorResponse {
-  Executor executor = 1;
-}
-
-message UpdateExecutorRequest {
-  string executor_id = 1;
-  optional string last_name = 2;
-  optional string first_name = 3;
-  optional string middle_name = 4;
-  optional string position = 5;
-  string actor_user_id = 6;
-  repeated string project_ids = 7;
-  bool update_project_ids = 8;
-}
-
-message UpdateExecutorResponse {
-  Executor executor = 1;
-}
-
-message DeleteExecutorRequest {
-  string executor_id = 1;
-  string actor_user_id = 2;
-}
-
-message DeleteExecutorResponse {
-  bool deleted = 1;
-}
-
-// Deprecated wire-compatibility messages for retired account-link operations.
-message LinkExecutorUserRequest {
-  option deprecated = true;
-  string executor_id = 1;
-  string user_id = 2;
-  string actor_user_id = 3;
-}
-
-message LinkExecutorUserResponse {
-  option deprecated = true;
-  Executor executor = 1;
-}
-
-message UnlinkExecutorUserRequest {
-  option deprecated = true;
-  string executor_id = 1;
-  string actor_user_id = 2;
-}
-
-message UnlinkExecutorUserResponse {
-  option deprecated = true;
-  Executor executor = 1;
 }
 
 message GetNotificationContactsRequest {

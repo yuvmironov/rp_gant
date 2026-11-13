@@ -6,6 +6,7 @@ export { runWithDlq } from './consumer-dlq.js';
 export { withTransaction } from './transaction.js';
 export { createService, startService } from './service.js';
 export { buildSmtpUrl } from './smtp.js';
+export { fromProtoStruct, toProtoStruct } from './proto-struct.js';
 export {
   createGrpcClient,
   createMetadata,

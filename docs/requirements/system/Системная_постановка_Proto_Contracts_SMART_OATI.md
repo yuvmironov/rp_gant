@@ -203,7 +203,7 @@ proto/
 - `PageRequest`, `PageResponse`;
 - `ErrorDetail`;
 - `ActorContext`;
-- `UserRef`, `ExecutorRef`;
+- `UserRef`;
 - `ProjectAccess`;
 - `TimeRange`.
 
@@ -241,7 +241,7 @@ proto/
 - `ValidateSession` содержит `optional bool extend_idle`;
 - Sync передает `extend_idle=false`;
 - login/restore возвращают `set_cookie`;
-- `GetUsersByIds` и `GetExecutorsByIds` используются для обогащения;
+- `GetUsersByIds` используется для обогащения;
 - `GetUserRoles` используется Audit;
 - `ListAccessibleProjectIds` используется Project;
 - `EnsureProjectOwner` и `SetProjectOwnerMembership` используются Project.

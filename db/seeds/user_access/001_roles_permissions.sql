@@ -35,8 +35,6 @@ INSERT INTO access.permissions (code, scope, description) VALUES
   ('project.comment.moderate', 'project', 'Модерация комментариев'),
   ('project.import', 'project', 'Импорт плана'),
   ('project.export', 'project', 'Экспорт плана'),
-  ('executor.manage', 'app', 'Управление каталогом исполнителей'),
-  ('executor.link', 'app', 'Связывание исполнителя с пользователем'),
   ('app.users.manage', 'app', 'Управление пользователями'),
   ('app.settings.manage', 'app', 'Управление системными настройками')
 ON CONFLICT (code) DO UPDATE SET
@@ -68,7 +66,6 @@ INSERT INTO access.role_permissions (role_code, permission_code) VALUES
   ('project_owner', 'project.comment.moderate'),
   ('project_owner', 'project.import'),
   ('project_owner', 'project.export'),
-  ('project_owner', 'executor.manage'),
   ('project_manager', 'project.view'),
   ('project_manager', 'diagram.create'),
   ('project_manager', 'diagram.update'),

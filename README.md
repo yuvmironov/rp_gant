@@ -174,7 +174,7 @@ tools/                 # проверки контрактов
 - [x] Project-scoped sync tokens и authenticated WebSocket.
 - [x] Email/Telegram delivery worker, notification preferences и Telegram linking.
 - [x] Session restore, profile editing and local admin user creation.
-- [x] Executor CRUD, user linking, admin user roles, blocking and user lifecycle.
+- [x] Admin user roles, blocking and user lifecycle.
 - [x] Load tests (k6 smoke: 10 VUs, 20s, p95 43 ms, 0 errors).
 - [x] Prometheus metrics, local Grafana dashboards and alerts для HTTP, outbox, consumer retry/DLQ и Kafka lag.
 - [x] System settings UI, audit filters and authenticated k6 scenario.

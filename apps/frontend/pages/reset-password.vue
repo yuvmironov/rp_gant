@@ -30,6 +30,9 @@ async function api(path, body) {
 }
 
 function invalidLinkMessage(reason) {
+  if (String(reason).includes('invalid_password')) {
+    return 'Пароль не соответствует действующей политике безопасности.';
+  }
   return String(reason).includes('invalid_token') || String(reason).includes('token_required')
     ? 'Ссылка недействительна, истекла или уже использована. Запросите новую ссылку для сброса пароля.'
     : reason;
@@ -117,15 +120,15 @@ onMounted(async () => {
             <div class="field">
               <label for="reset-password">Новый пароль</label>
               <div class="password-control">
-                <input id="reset-password" v-model="newPassword" class="input" name="newPassword" :type="showPassword ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" required />
+                <input id="reset-password" v-model="newPassword" class="input" name="newPassword" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
                 <button class="password-toggle" type="button" :aria-label="showPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showPassword = !showPassword">{{ showPassword ? 'Скрыть' : 'Показать' }}</button>
               </div>
-              <span class="field-hint">Не менее 8 символов</span>
+              <span class="field-hint">Пароль должен соответствовать действующей политике безопасности.</span>
             </div>
             <div class="field">
               <label for="reset-confirm-password">Подтверждение пароля</label>
               <div class="password-control">
-                <input id="reset-confirm-password" v-model="confirmPassword" class="input" name="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" required />
+                <input id="reset-confirm-password" v-model="confirmPassword" class="input" name="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" autocomplete="new-password" required />
                 <button class="password-toggle" type="button" :aria-label="showConfirmPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showConfirmPassword = !showConfirmPassword">{{ showConfirmPassword ? 'Скрыть' : 'Показать' }}</button>
               </div>
             </div>

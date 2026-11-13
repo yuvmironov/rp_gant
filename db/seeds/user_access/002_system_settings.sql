@@ -1,4 +1,4 @@
--- User & Access DB seed: system settings
+-- User & Access DB seed: system settings; keep administrator changes on subsequent bootstraps.
 
 INSERT INTO settings.system_settings (key, value, description) VALUES
   ('password_min_length', '8'::jsonb, 'Минимальная длина пароля'),
@@ -17,6 +17,4 @@ INSERT INTO settings.system_settings (key, value, description) VALUES
   ('password_reset_hours', '1'::jsonb, 'Срок токена сброса пароля'),
   ('invitation_days', '7'::jsonb, 'Срок приглашения'),
   ('telegram_link_code_minutes', '10'::jsonb, 'Срок кода привязки Telegram')
-ON CONFLICT (key) DO UPDATE SET
-  value = EXCLUDED.value,
-  description = EXCLUDED.description;
+ON CONFLICT (key) DO NOTHING;

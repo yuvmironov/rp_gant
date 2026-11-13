@@ -64,7 +64,8 @@ enum AssignmentRole {
 enum AssigneeType {
   ASSIGNEE_TYPE_UNSPECIFIED = 0;
   ASSIGNEE_TYPE_USER = 1;
-  ASSIGNEE_TYPE_EXECUTOR = 2;
+  reserved 2;
+  reserved "ASSIGNEE_TYPE_EXECUTOR";
 }
 
 enum DependencyLinkType {
@@ -182,14 +183,6 @@ message UserRef {
   string user_id = 1;
   string display_name = 2;
   bool resolved = 3;
-}
-
-message ExecutorRef {
-  string executor_id = 1;
-  string full_name = 2;
-  string position = 3;
-  string linked_user_id = 4;
-  bool resolved = 5;
 }
 
 message ProjectAccess {

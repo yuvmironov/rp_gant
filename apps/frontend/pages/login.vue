@@ -20,7 +20,8 @@ watch(message, (value) => {
 });
 
 function friendlyError(message) {
-  if (String(message).includes('session_limit_reached')) return 'Достигнут лимит двух активных сессий';
+  if (String(message).includes('invalid_password')) return 'Пароль не соответствует действующей политике безопасности.';
+  if (String(message).includes('session_limit_reached')) return 'Достигнут лимит активных сессий';
   if (String(message).includes('email_not_verified')) {
     return 'Email не подтверждён. Проверьте почту или запросите письмо ещё раз.';
   }
@@ -251,15 +252,15 @@ onMounted(async () => {
           <div class="field">
             <label for="register-password">Пароль</label>
             <div class="password-control">
-              <input id="register-password" v-model="password" class="input" name="password" :type="showRegistrationPassword ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" required />
+              <input id="register-password" v-model="password" class="input" name="password" :type="showRegistrationPassword ? 'text' : 'password'" autocomplete="new-password" required />
               <button class="password-toggle" type="button" :aria-label="showRegistrationPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showRegistrationPassword = !showRegistrationPassword">{{ showRegistrationPassword ? 'Скрыть' : 'Показать' }}</button>
             </div>
-            <span class="field-hint">Не менее 8 символов</span>
+            <span class="field-hint">Пароль должен соответствовать действующей политике безопасности.</span>
           </div>
           <div class="field">
             <label for="register-confirm-password">Подтверждение пароля</label>
             <div class="password-control">
-              <input id="register-confirm-password" v-model="confirmPassword" class="input" name="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" required />
+              <input id="register-confirm-password" v-model="confirmPassword" class="input" name="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" autocomplete="new-password" required />
               <button class="password-toggle" type="button" :aria-label="showConfirmPassword ? 'Скрыть пароль' : 'Показать пароль'" @click="showConfirmPassword = !showConfirmPassword">{{ showConfirmPassword ? 'Скрыть' : 'Показать' }}</button>
             </div>
           </div>

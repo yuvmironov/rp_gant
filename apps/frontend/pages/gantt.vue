@@ -49,7 +49,6 @@ const pendingImportFile = ref(null);
 const importPreview = ref(null);
 const showImportModal = ref(false);
 const members = ref([]);
-const executors = ref([]);
 const unreadCount = ref(0);
 const filterQuery = ref('');
 const filterStatus = ref('');
@@ -97,24 +96,6 @@ function syncFromTopScroll(event) {
   }
 }
 
-function modalPeopleFor(role) {
-  const people = members.value.map((member) => ({
-    value: `user:${member.userId}`,
-    label: member.user?.displayName || member.user?.email || member.userId,
-  }));
-  const legacy = editingTaskId.value
-    ? selectedTask.value?.assignments?.find(
-        (assignment) => assignment.role === role && assignment.assigneeType === 'executor',
-      )
-    : null;
-  if (legacy) {
-    people.push({
-      value: `executor:${legacy.assigneeId}`,
-      label: `${legacy.displayName || legacy.assigneeId} — старое назначение (замените участником проекта)`,
-    });
-  }
-  return people;
-}
 const newTask = reactive({
   estimatedHours: null,
   directionId: '',
@@ -276,19 +257,21 @@ async function loadAllPages(path, parameters = {}) {
 async function loadProjectContext() {
   if (!projectId.value) {
     members.value = [];
-    executors.value = [];
     diagrams.value = [];
     snapshot.value = null;
     return;
   }
-  const [memberItems, executorItems] = await Promise.all([
-    loadAllPages(`/projects/${projectId.value}/members`).catch(() => []),
-    loadAllPages('/executors', { projectId: projectId.value }).catch(() => []),
-  ]);
+  const memberItems = await loadAllPages(`/projects/${projectId.value}/members`).catch(() => []);
   members.value = memberItems.filter(
     (member) => member.status === 'active' && member.user?.status === 'active',
   );
-  executors.value = executorItems;
+}
+
+function modalPeopleFor() {
+  return members.value.map((member) => ({
+    value: `user:${member.userId}`,
+    label: member.user?.displayName || member.user?.email || member.userId,
+  }));
 }
 
 async function selectProject() {
@@ -412,17 +395,12 @@ function modalAssignments() {
       }
       continue;
     }
-    if (
-      existing.role === 'executor' &&
-      existing.assigneeType === 'executor' &&
-      !assignments.some((item) => item.role === existing.role)
-    ) {
+    if (existing.role !== 'executor') {
       assignments.push({
         role: existing.role,
         assigneeType: existing.assigneeType,
         assigneeId: existing.assigneeId,
       });
-      submittedKeys.add(key);
     }
   }
   return assignments;
@@ -618,13 +596,7 @@ function fillAssignments(task) {
   assignmentForm.assigneeId = '';
 }
 
-function assignmentOptions(type) {
-  if (type === 'executor') {
-    return executors.value.map((executor) => ({
-      id: executor.id,
-      displayName: executor.fullName || executor.id,
-    }));
-  }
+function assignmentOptions() {
   return members.value.map((member) => ({
     id: member.userId,
     displayName: member.user?.displayName || member.user?.email,
@@ -641,7 +613,7 @@ watch(
 function assignmentName(assignment) {
   return (
     assignment.displayName ||
-    assignmentOptions(assignment.assigneeType).find((item) => item.id === assignment.assigneeId)?.displayName ||
+    assignmentOptions().find((item) => item.id === assignment.assigneeId)?.displayName ||
     assignment.assigneeId
   );
 }
@@ -2587,14 +2559,14 @@ onMounted(async () => {
           </select>
           <div class="assignment-scope-note">
             <p class="muted small">
-              Новые назначения доступны только активным участникам проекта. Запись каталога сама по себе не даёт членство.
+              Новые назначения доступны только активным участникам проекта. Для назначения пользователь должен быть активным участником проекта.
               Чтобы назначить этого человека, пригласите его учётную запись в проект и дождитесь принятия приглашения.
             </p>
             <a class="btn btn-ghost btn-sm assignment-members-link" :href="projectMembersUrl">Участники проекта</a>
           </div>
           <select v-model="assignmentForm.assigneeId" class="input">
             <option value="">Выберите</option>
-            <option v-for="option in assignmentOptions('user')" :key="option.id" :value="option.id">{{ option.displayName }}</option>
+            <option v-for="option in assignmentOptions()" :key="option.id" :value="option.id">{{ option.displayName }}</option>
           </select>
           <button class="btn btn-secondary" type="button" @click="addAssignment">Добавить назначение</button>
         </div>

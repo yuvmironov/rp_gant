@@ -96,9 +96,6 @@
 - `POST /api/v1/admin/users`, `DELETE /api/v1/admin/users/{userId}`;
 - `PATCH /api/v1/admin/users/{userId}/profile`, `PATCH /api/v1/admin/users/{userId}/roles`;
 - `PATCH /api/v1/admin/users/{userId}/block`, `PATCH /api/v1/admin/users/{userId}/unblock`;
-- `GET /api/v1/executors` accepts `projectId` to return only catalog entries available in that project;
-- `POST /api/v1/executors` and `PATCH /api/v1/executors/{executorId}` require a non-empty `projectIds` array of active projects;
-- `DELETE /api/v1/executors/{executorId}` deactivates an executor and removes its project associations;
 - `GET /api/v1/users/me/contacts`;
 - `POST /api/v1/users/me/telegram/link-code`, `POST /api/v1/users/me/telegram`, `DELETE /api/v1/users/me/telegram`.
 

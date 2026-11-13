@@ -94,7 +94,8 @@ message Assignment {
   rpgant.common.v1.AssigneeType assignee_type = 3;
   string assignee_id = 4;
   string display_name = 5;
-  string linked_user_id = 6;
+  reserved 6;
+  reserved "linked_user_id";
   bool resolved = 7;
 }
 

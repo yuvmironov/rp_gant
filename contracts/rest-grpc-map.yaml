@@ -38,10 +38,6 @@ operations:
   getSystemSettings: { service: UserService, method: GetSystemSettings }
   updateSystemSettings: { service: UserService, method: UpdateSystemSettings }
   getPermissions: { service: UserService, method: GetPermissions }
-  listExecutors: { service: UserService, method: ListExecutors }
-  createExecutor: { service: UserService, method: CreateExecutor }
-  updateExecutor: { service: UserService, method: UpdateExecutor }
-  deleteExecutor: { service: UserService, method: DeleteExecutor }
   listProjects: { service: ProjectService, method: ListProjects }
   createProject: { service: ProjectService, method: CreateProject }
   getProject: { service: ProjectService, method: GetProject }

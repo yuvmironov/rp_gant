@@ -59,6 +59,23 @@ describe('standalone assignment import/export compatibility', () => {
     ).toBe(false);
   });
 
+  it('reports unresolved legacy names and leaves them unassigned', () => {
+    const importReport = report();
+    const payload = normalizeStandaloneImport(
+      {
+        tasks: [
+          { id: '1.1', level: 2, type: 'Р—Р°РґР°С‡Р°', task: 'Unmapped', execId: 'Unknown Person' },
+        ],
+      },
+      importReport,
+      new Map(),
+      activeMembers,
+    );
+
+    expect(payload.tasks[0].assignments).toEqual([]);
+    expect(importReport.issues).toContain('executor_not_mapped:1.1:Unknown Person');
+  });
+
   it('imports legacy CSV owner/executor columns into context-specific roles', () => {
     const importReport = report();
     const csv = [
