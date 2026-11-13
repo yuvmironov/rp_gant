@@ -2,7 +2,7 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
-> **Статус:** production VPS обновлён 2026-11-12 до release `6643a1a` (`PR #155`) после подтверждённой владельцем staging-приёмки. Выполнены rollout и health checks. По явному решению владельца pre-migration backup сохранён только на диске VPS и проверен восстановлением в изолированный PostgreSQL; off-host копии нет — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
+> **Статус:** production VPS обновлён 2026-11-13 до release `7757261` (`PR #160`) после подтверждённой владельцем staging-приёмки. Выполнены rollout и health checks. По явному решению владельца pre-migration backup сохранён только на диске VPS и проверен восстановлением в изолированный PostgreSQL; off-host копии нет — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
 
 ## Требования
 
@@ -76,12 +76,20 @@ curl -fsS https://sync.rp-gant.ru/health/live
 
 ## Последний rollout
 
-- Release: `6643a1a` (`PR #155`), 2026-11-12; staging acceptance подтверждена владельцем.
-- `db-init` успешно применил миграции, включая user `0004_executor_projects` и project `0008_assignment_roles_by_entity`; все пять service DB присутствуют.
+- Release: `7757261` (`PR #160`), 2026-11-13; staging acceptance подтверждена владельцем.
+- GitHub CI, contracts, security и image builds прошли; локальный E2E — 27/27.
+- `db-init` завершился успешно: project `0009_user_only_task_assignments` применён до user `0005_remove_executor_catalog` и `0006_runtime_system_settings`. Перед миграцией guard обнаружил 0 legacy executor assignments; все пять service DB присутствуют.
+- Все сервисные контейнеры healthy; внешний `https://app.rp-gant.ru/health` и Sync `/health/live` вернули HTTP 200. Внутренние Sync `/health/live` и `/health/ready` ответили `ok`/`ready`.
+- Pre-migration полный PostgreSQL backup: `/opt/rp-gant-backups/rp-gant-20261113-154911.sql` (788011 bytes, mode `0600`, SHA-256 `5ea0160fce33b145804d910670868552a7bc188ec1ca4cc8729fe3a9fd0f9da3`). Восстановление проверено в изолированном PostgreSQL; контрольные таблицы всех пяти БД доступны.
+- **Исключение по решению владельца:** backup оставлен только на VPS, off-host копии нет. Изолированный restore drill подтверждает читаемость, но не защищает от потери VPS; обычное требование runbook не изменено.
+- Kubernetes staging rollout не выполнялся.
+
+### Предыдущий rollout: `6643a1a` (`PR #155`), 2026-11-12
+
+- `db-init` успешно применил миграции, включая user `0004_executor_projects` и project `0008_assignment_roles_by_entity`; все пять service DB присутствовали.
 - Backfill: dry-run просканировал 0 назначений; apply выполнил 0 обновлений и 0 удалений.
-- Все app containers проверены; внешние app и Sync health endpoints вернули 200, Sync `/health/live` и `/health/ready` отвечают `ok`/`ready`.
-- Pre-migration полный PostgreSQL backup: `/opt/rp-gant-backups/rp-gant-pre-assignments-9f43bcc.sql` (5 DB, 690533 bytes, mode `0600`). Изолированный restore drill прошёл на том же VPS.
-- **Исключение по решению владельца:** backup не скопирован off-host; локальный backup и restore drill не защищают от потери VPS. Kubernetes staging rollout не выполнялся.
+- Pre-migration backup `/opt/rp-gant-backups/rp-gant-pre-assignments-9f43bcc.sql` (5 DB, 690533 bytes, mode `0600`); restore drill прошёл на том же VPS.
+- По отдельному решению владельца тогда также не создавалась off-host копия.
 
 ## Начальный администратор
 
