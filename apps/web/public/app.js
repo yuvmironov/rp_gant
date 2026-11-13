@@ -8,7 +8,6 @@ const state = {
   task: null,
   comments: [],
   users: null,
-  executors: null,
   sessions: [],
   members: [],
   invitations: [],
@@ -93,24 +92,13 @@ function setTableMessage(message) {
 }
 
 async function loadDirectory() {
-  if (state.users && state.executors) return;
-  const [users, executors] = await Promise.allSettled([
-    api('/users?limit=200'),
-    api('/executors?limit=200'),
-  ]);
-  state.users = users.status === 'fulfilled' ? (users.value.items ?? []) : [];
-  state.executors = executors.status === 'fulfilled' ? (executors.value.items ?? []) : [];
+  if (state.users) return;
+  const users = await api('/users?limit=200');
+  state.users = users.items ?? [];
   if (state.users.length === 0 && state.user) {
     state.users = [
-      {
-        id: state.user.id,
-        displayName: state.user.displayName,
-        email: state.user.email,
-      },
+      { id: state.user.id, displayName: state.user.displayName, email: state.user.email },
     ];
-  }
-  if (users.status === 'rejected' && executors.status === 'rejected') {
-    throw users.reason;
   }
 }
 
@@ -128,7 +116,6 @@ function showApp() {
   $('#audit-toggle').classList.toggle('hidden', !isAdmin);
   $('#admin-toggle').classList.toggle('hidden', !isAdmin);
   $('#settings-toggle').classList.toggle('hidden', !isAdmin);
-  $('#executors-toggle').classList.toggle('hidden', !isAdmin);
   window.clearInterval(unreadTimer);
   loadUnreadCount();
   unreadTimer = window.setInterval(loadUnreadCount, 60_000);
@@ -653,7 +640,7 @@ function renderAssignments() {
       (assignment) => `
         <div class="list-item assignment-item">
           <span class="item-title">${escapeHtml(assignment.displayName || assignment.assigneeId)}</span>
-          <span class="item-meta">${escapeHtml(assignmentRoleLabel(assignment.role))} · ${escapeHtml(assignment.assigneeType === 'executor' ? 'Исполнитель' : 'Пользователь')}</span>
+          <span class="item-meta">${escapeHtml(assignmentRoleLabel(assignment.role))} · ${escapeHtml('Пользователь')}</span>
           <button class="ghost small" data-assignment-remove="${escapeHtml(assignment.id)}" type="button">Убрать</button>
         </div>`,
     )
@@ -661,9 +648,8 @@ function renderAssignments() {
 }
 
 function renderAssignmentPeople() {
-  const type = $('#assignment-type').value;
   const select = $('#assignment-person');
-  const items = type === 'executor' ? (state.executors ?? []) : (state.users ?? []);
+  const items = state.users ?? [];
   select.innerHTML = items
     .map(
       (item) =>
@@ -672,12 +658,10 @@ function renderAssignmentPeople() {
     .join('');
 }
 
-$('#assignment-type').addEventListener('change', renderAssignmentPeople);
-
 $('#assignment-add').addEventListener('click', async () => {
   if (!state.task) return;
   const role = $('#assignment-role').value;
-  const assigneeType = $('#assignment-type').value;
+  const assigneeType = 'user';
   const assigneeId = $('#assignment-person').value;
   if (!assigneeId) {
     showToast('Нет доступных исполнителей');
@@ -1471,127 +1455,6 @@ function disconnectSync() {
 }
 
 window.addEventListener('beforeunload', disconnectSync);
-
-async function openExecutors() {
-  $('#executors-modal').classList.remove('hidden');
-  $('#executor-form').reset();
-  $('#executor-form input[name=executorId]').value = '';
-  await refreshExecutors();
-}
-
-async function refreshExecutors() {
-  const container = $('#executor-list');
-  container.innerHTML = '<p class="empty">Загрузка...</p>';
-  try {
-    const [executors, users] = await Promise.all([
-      api('/executors?limit=200'),
-      api('/users?limit=200'),
-    ]);
-    state.executors = executors.items ?? [];
-    state.users = users.items ?? [];
-    renderExecutors();
-  } catch (error) {
-    container.innerHTML = '<p class="empty">Не удалось загрузить исполнителей.</p>';
-    showToast(error.message);
-  }
-}
-
-function renderExecutors() {
-  const container = $('#executor-list');
-  container.innerHTML =
-    (state.executors ?? [])
-      .map((executor) => {
-        const userOptions = (state.users ?? [])
-          .map(
-            (user) =>
-              `<option value="${escapeHtml(user.id)}" ${executor.linkedUserId === user.id ? 'selected' : ''}>${escapeHtml(user.displayName || user.email)}</option>`,
-          )
-          .join('');
-        return `
-          <div class="list-item">
-            <span class="item-title">${escapeHtml(executor.fullName)}</span>
-            <span class="item-meta">${escapeHtml(executor.position || '')}${executor.linkedUserId ? ' · связан с пользователем' : ''}</span>
-            <div class="inline-fields">
-              <select data-executor-user="${escapeHtml(executor.id)}">
-                <option value="">Без пользователя</option>
-                ${userOptions}
-              </select>
-              <button class="ghost small" data-executor-link="${escapeHtml(executor.id)}" type="button">Связать</button>
-              <button class="ghost small" data-executor-edit="${escapeHtml(executor.id)}" type="button">Изменить</button>
-              <button class="ghost small" data-executor-delete="${escapeHtml(executor.id)}" type="button">Удалить</button>
-            </div>
-          </div>`;
-      })
-      .join('') || '<p class="empty">Исполнителей пока нет.</p>';
-}
-
-$('#executors-toggle').addEventListener('click', openExecutors);
-$('#executors-close').addEventListener('click', () =>
-  $('#executors-modal').classList.add('hidden'),
-);
-
-$('#executor-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const executorId = data.get('executorId');
-  const body = {
-    lastName: data.get('lastName'),
-    firstName: data.get('firstName'),
-    middleName: data.get('middleName'),
-    position: data.get('position'),
-  };
-  try {
-    if (executorId) {
-      await api(`/executors/${executorId}`, { method: 'PATCH', body });
-    } else {
-      await api('/executors', { method: 'POST', body });
-    }
-    form.reset();
-    form.querySelector('input[name=executorId]').value = '';
-    await refreshExecutors();
-  } catch (error) {
-    showToast(error.message);
-  }
-});
-
-$('#executor-list').addEventListener('click', async (event) => {
-  const edit = event.target.closest('[data-executor-edit]');
-  const remove = event.target.closest('[data-executor-delete]');
-  const link = event.target.closest('[data-executor-link]');
-  const executor = state.executors?.find(
-    (item) =>
-      item.id ===
-      (edit?.dataset.executorEdit || remove?.dataset.executorDelete || link?.dataset.executorLink),
-  );
-  try {
-    if (edit) {
-      const form = $('#executor-form');
-      form.querySelector('input[name=executorId]').value = executor.id;
-      form.querySelector('input[name=lastName]').value = executor.lastName ?? '';
-      form.querySelector('input[name=firstName]').value = executor.firstName ?? '';
-      form.querySelector('input[name=middleName]').value = executor.middleName ?? '';
-      form.querySelector('input[name=position]').value = executor.position ?? '';
-    } else if (remove) {
-      if (!window.confirm('Удалить исполнителя?')) return;
-      await api(`/executors/${executor.id}`, { method: 'DELETE' });
-      await refreshExecutors();
-    } else if (link) {
-      const select = document.querySelector(`[data-executor-user="${executor.id}"]`);
-      if (select.value) {
-        await api(`/executors/${executor.id}/link`, {
-          method: 'POST',
-          body: { userId: select.value },
-        });
-      } else {
-        await api(`/executors/${executor.id}/link`, { method: 'DELETE' });
-      }
-      await refreshExecutors();
-    }
-  } catch (error) {
-    showToast(error.message);
-  }
-});
 
 async function openAdmin() {
   $('#admin-modal').classList.remove('hidden');

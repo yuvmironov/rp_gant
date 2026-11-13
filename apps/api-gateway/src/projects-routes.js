@@ -122,7 +122,7 @@ function assignmentRoleEnum(value) {
 }
 
 function assigneeTypeEnum(value) {
-  return value === 'executor' ? 'ASSIGNEE_TYPE_EXECUTOR' : 'ASSIGNEE_TYPE_USER';
+  return value === 'user' ? 'ASSIGNEE_TYPE_USER' : 'ASSIGNEE_TYPE_UNSPECIFIED';
 }
 
 function dependencyLineStyleEnum(value) {
@@ -179,10 +179,9 @@ export function mapAssignment(assignment) {
         ASSIGNMENT_ROLE_EXECUTOR: 'executor',
         ASSIGNMENT_ROLE_CO_EXECUTOR: 'co_executor',
       }[assignment.role] ?? 'responsible',
-    assigneeType: assignment.assignee_type === 'ASSIGNEE_TYPE_EXECUTOR' ? 'executor' : 'user',
+    assigneeType: 'user',
     assigneeId: assignment.assignee_id,
     displayName: assignment.display_name,
-    linkedUserId: assignment.linked_user_id,
     resolved: assignment.resolved,
   };
 }
@@ -522,7 +521,6 @@ function standaloneExport(snapshotData, format) {
         name: holiday.name,
       })),
     },
-    executors: [],
     depStyles,
     tasks,
   };

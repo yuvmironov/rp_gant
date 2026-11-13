@@ -583,13 +583,6 @@ User & Access потребляет:
 
 | Метод | Назначение | Доступ |
 |-------|------------|--------|
-| `ListExecutors` | Список | Авторизованные |
-| `GetExecutorsByIds` | Пакетное получение | Project, Notification |
-| `CreateExecutor` | Создать | Админ, владелец |
-| `UpdateExecutor` | Изменить | Админ, владелец |
-| `DeleteExecutor` | Удалить | Админ, владелец |
-| `LinkExecutorUser` | Связать с пользователем | Админ |
-| `UnlinkExecutorUser` | Разорвать связь | Админ |
 
 ### 8.7. Контакты и Telegram
 
@@ -713,7 +706,7 @@ User & Access потребляет:
 - `GetProjectAccess` — роль и права.
 - `ListAccessibleProjectIds` — проекты, доступные пользователю.
 - `SetProjectOwnerMembership` — передача владения.
-- `GetExecutorsByIds`, `GetUsersByIds` — пакетное обогащение.
+- `GetUsersByIds` — пакетное обогащение.
 
 ### 10.3. API Gateway
 

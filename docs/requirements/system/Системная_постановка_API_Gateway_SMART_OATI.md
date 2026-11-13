@@ -194,7 +194,6 @@ sequenceDiagram
 |--------|------------|--------|
 | `/api/v1/auth/*` | Регистрация, вход, выход, подтверждение email, сброс пароля, текущая сессия | User & Access |
 | `/api/v1/users/*` | Профили и административное управление пользователями | User & Access |
-| `/api/v1/executors/*` | Каталог исполнителей | User & Access |
 | `/api/v1/invitations/*` | Приглашения в проекты | User & Access |
 | `/api/v1/projects/*` | Проекты, архив, восстановление | Project / Diagram |
 | `/api/v1/projects/{projectId}/members/*` | Участники и роли проекта | User & Access |

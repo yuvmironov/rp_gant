@@ -24,13 +24,18 @@ assert_count() {
 }
 
 assert_count rp_gant_user "SELECT count(*) FROM access.roles" 6
-assert_count rp_gant_user "SELECT count(*) FROM access.permissions" 26
-assert_count rp_gant_user "SELECT count(*) FROM access.role_permissions" 72
+assert_count rp_gant_user "SELECT count(*) FROM access.permissions" 24
+assert_count rp_gant_user "SELECT count(*) FROM access.role_permissions" 69
 assert_count rp_gant_user "SELECT count(*) FROM settings.system_settings" 16
 assert_count rp_gant_audit "SELECT count(*) FROM audit.audit_actions" 64
 assert_count rp_gant_sync "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'events' AND table_name = 'processed_events'" 1
 assert_count rp_gant_project "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'project' AND table_name = 'projects'" 1
+psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_user -c "UPDATE settings.system_settings SET value = '3'::jsonb WHERE key = 'max_sessions'"
+psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_user -f db/seeds/user_access/002_system_settings.sql
+assert_count rp_gant_user "SELECT value::text FROM settings.system_settings WHERE key = 'max_sessions'" 3
+psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_user -c "UPDATE settings.system_settings SET value = '2'::jsonb WHERE key = 'max_sessions'"
 assert_count rp_gant_project "SELECT count(*) FROM pg_constraint WHERE conname = 'assignments_entity_role_assignee_check'" 1
+assert_count rp_gant_user "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'access' AND table_name IN ('executors', 'executor_projects')" 0
 
 psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d rp_gant_project <<'SQL'
 BEGIN;
@@ -65,6 +70,20 @@ BEGIN
   IF NOT rejected THEN
     RAISE EXCEPTION 'catalog direction responsible assignment was accepted';
   END IF;
+
+  rejected := false;
+  BEGIN
+    INSERT INTO plan.assignments
+      (entity_type, entity_id, role, assignee_type, assignee_id, created_by_user_id)
+    VALUES
+      ('task', '11111111-1111-4111-8111-111111111111', 'executor', 'executor',
+       '55555555-5555-4555-8555-555555555555', '33333333-3333-4333-8333-333333333333');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  IF NOT rejected THEN
+    RAISE EXCEPTION 'catalog task assignment was accepted';
+  END IF;
 END;
 $$;
 ROLLBACK;
@@ -77,6 +96,7 @@ DECLARE
   regular_user uuid;
   expired_remember_user uuid;
   active_remember_user uuid;
+  configurable_limit_user uuid;
   limit_hit boolean;
 BEGIN
   INSERT INTO access.users (email, password_hash, display_name)
@@ -181,6 +201,31 @@ BEGIN
   END;
   IF NOT limit_hit THEN
     RAISE EXCEPTION 'active remember token was not counted toward the session limit';
+  END IF;
+
+  UPDATE settings.system_settings SET value = '3'::jsonb WHERE key = 'max_sessions';
+  INSERT INTO access.users (email, password_hash, display_name)
+  VALUES ('session-configurable-' || gen_random_uuid() || '@example.test', 'test-hash', 'Configurable limit test')
+  RETURNING id INTO configurable_limit_user;
+  INSERT INTO access.user_sessions (user_id, session_token_hash, absolute_expires_at, idle_expires_at)
+  VALUES
+    (configurable_limit_user, md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text), now() + interval '50 minutes', now() + interval '5 minutes'),
+    (configurable_limit_user, md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text), now() + interval '50 minutes', now() + interval '5 minutes'),
+    (configurable_limit_user, md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text), now() + interval '50 minutes', now() + interval '5 minutes');
+
+  limit_hit := false;
+  BEGIN
+    INSERT INTO access.user_sessions (user_id, session_token_hash, absolute_expires_at, idle_expires_at)
+    VALUES (configurable_limit_user, md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text), now() + interval '50 minutes', now() + interval '5 minutes');
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'session_limit_reached' THEN
+      limit_hit := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT limit_hit THEN
+    RAISE EXCEPTION 'configured session limit was not enforced';
   END IF;
 END;
 $$;

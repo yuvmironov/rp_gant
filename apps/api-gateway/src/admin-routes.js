@@ -1,47 +1,5 @@
 import { call } from './user-client.js';
-import { call as callProject } from './project-client.js';
-import { mapExecutor, mapUser, sendProblem } from './auth-routes.js';
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-async function validateExecutorProjectIds(projectClient, actorUserId, values) {
-  const projectIds = Array.isArray(values)
-    ? [
-        ...new Set(
-          values.map((value) =>
-            String(value ?? '')
-              .trim()
-              .toLowerCase(),
-          ),
-        ),
-      ]
-    : [];
-  if (!projectIds.length || projectIds.some((id) => !UUID_PATTERN.test(id))) {
-    const error = new Error('executor_projects_required');
-    error.code = 3;
-    throw error;
-  }
-  const activeIds = new Set();
-  let offset = 0;
-  let total = Infinity;
-  while (offset < total) {
-    const response = await callProject(projectClient, 'ListProjects', {
-      user_id: actorUserId,
-      status: 'PROJECT_STATUS_ACTIVE',
-      page: { limit: 200, offset },
-    });
-    for (const project of response.items ?? []) activeIds.add(project.id);
-    total = Number(response.page?.total ?? activeIds.size);
-    offset += (response.items ?? []).length;
-    if ((response.items ?? []).length === 0) break;
-  }
-  if (projectIds.some((id) => !activeIds.has(id))) {
-    const error = new Error('executor_project_not_active');
-    error.code = 3;
-    throw error;
-  }
-  return projectIds;
-}
+import { mapUser, sendProblem } from './auth-routes.js';
 
 export function unauthorized(reply, request) {
   return reply.code(401).type('application/problem+json').send({
@@ -89,72 +47,7 @@ export async function requireAdmin(userClient, request, reply) {
   return { session };
 }
 
-export async function adminRoutes(app, { userClient, projectClient }) {
-  app.post('/api/v1/executors', async (request, reply) => {
-    if (!csrfValid(request)) return forbidden(reply, request);
-    const access = await requireAdmin(userClient, request, reply);
-    if (access.denied) return access.denied;
-    try {
-      const projectIds = await validateExecutorProjectIds(
-        projectClient,
-        access.session.user_id,
-        request.body?.projectIds,
-      );
-      const response = await call(userClient, 'CreateExecutor', {
-        last_name: request.body?.lastName,
-        first_name: request.body?.firstName,
-        middle_name: request.body?.middleName,
-        position: request.body?.position,
-        project_ids: projectIds,
-        actor_user_id: access.session.user_id,
-      });
-      return reply.code(201).send(mapExecutor(response.executor));
-    } catch (error) {
-      return sendProblem(reply, request, error);
-    }
-  });
-
-  app.patch('/api/v1/executors/:executorId', async (request, reply) => {
-    if (!csrfValid(request)) return forbidden(reply, request);
-    const access = await requireAdmin(userClient, request, reply);
-    if (access.denied) return access.denied;
-    try {
-      const projectIds = await validateExecutorProjectIds(
-        projectClient,
-        access.session.user_id,
-        request.body?.projectIds,
-      );
-      const response = await call(userClient, 'UpdateExecutor', {
-        executor_id: request.params.executorId,
-        last_name: request.body?.lastName,
-        first_name: request.body?.firstName,
-        middle_name: request.body?.middleName,
-        position: request.body?.position,
-        project_ids: projectIds,
-        update_project_ids: true,
-        actor_user_id: access.session.user_id,
-      });
-      return reply.send(mapExecutor(response.executor));
-    } catch (error) {
-      return sendProblem(reply, request, error);
-    }
-  });
-
-  app.delete('/api/v1/executors/:executorId', async (request, reply) => {
-    if (!csrfValid(request)) return forbidden(reply, request);
-    const access = await requireAdmin(userClient, request, reply);
-    if (access.denied) return access.denied;
-    try {
-      await call(userClient, 'DeleteExecutor', {
-        executor_id: request.params.executorId,
-        actor_user_id: access.session.user_id,
-      });
-      return reply.code(204).send();
-    } catch (error) {
-      return sendProblem(reply, request, error);
-    }
-  });
-
+export async function adminRoutes(app, { userClient }) {
   app.patch('/api/v1/admin/users/:userId/roles', async (request, reply) => {
     if (!csrfValid(request)) return forbidden(reply, request);
     const access = await requireAdmin(userClient, request, reply);

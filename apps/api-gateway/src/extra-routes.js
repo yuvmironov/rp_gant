@@ -1,3 +1,4 @@
+import { fromProtoStruct, toProtoStruct } from '@rp-gant/service-kit';
 import { call } from './user-client.js';
 import { mapUser, sendProblem } from './auth-routes.js';
 import { csrfValid, forbidden, requireAdmin, sessionFor, unauthorized } from './admin-routes.js';
@@ -94,7 +95,14 @@ export async function extraRoutes(app, { userClient }) {
     const access = await requireUser(userClient, request, reply);
     if (access.denied) return access.denied;
     try {
-      return reply.send(await call(userClient, 'GetSystemSettings', {}));
+      const response = await call(userClient, 'GetSystemSettings', {});
+      return reply.send({
+        ...response,
+        items: (response.items ?? []).map((item) => ({
+          ...item,
+          value: fromProtoStruct(item.value),
+        })),
+      });
     } catch (error) {
       return sendProblem(reply, request, error);
     }
@@ -105,12 +113,20 @@ export async function extraRoutes(app, { userClient }) {
     const access = await requireAdmin(userClient, request, reply);
     if (access.denied) return access.denied;
     try {
-      return reply.send(
-        await call(userClient, 'UpdateSystemSettings', {
-          items: request.body?.items ?? [],
-          actor_user_id: access.session.user_id,
-        }),
-      );
+      const response = await call(userClient, 'UpdateSystemSettings', {
+        items: (request.body?.items ?? []).map((item) => ({
+          ...item,
+          value: toProtoStruct(item.value),
+        })),
+        actor_user_id: access.session.user_id,
+      });
+      return reply.send({
+        ...response,
+        items: (response.items ?? []).map((item) => ({
+          ...item,
+          value: fromProtoStruct(item.value),
+        })),
+      });
     } catch (error) {
       return sendProblem(reply, request, error);
     }

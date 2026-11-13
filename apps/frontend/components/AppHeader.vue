@@ -37,7 +37,7 @@ const initials = computed(() =>
         :class="{ active: activePage === 'admin' }"
         :aria-current="activePage === 'admin' ? 'page' : undefined"
       >
-        Админка
+        Администрирование
       </a>
     </nav>
     <div class="app-header-right">

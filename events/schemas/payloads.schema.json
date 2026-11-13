@@ -129,8 +129,7 @@
         "assignee_type": {
           "type": "string",
           "enum": [
-            "ASSIGNEE_TYPE_USER",
-            "ASSIGNEE_TYPE_EXECUTOR"
+            "ASSIGNEE_TYPE_USER"
           ]
         },
         "assignee_id": {
@@ -138,9 +137,6 @@
           "format": "uuid"
         },
         "display_name": {
-          "type": "string"
-        },
-        "linked_user_id": {
           "type": "string"
         },
         "resolved": {
@@ -979,81 +975,6 @@
           "$ref": "#/$defs/Uuid"
         },
         "projectId": {
-          "$ref": "#/$defs/Uuid"
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExecutorCreatedPayload": {
-      "type": "object",
-      "required": [
-        "executorId",
-        "isActive"
-      ],
-      "properties": {
-        "executorId": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "isActive": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExecutorUpdatedPayload": {
-      "type": "object",
-      "required": [
-        "executorId",
-        "isActive"
-      ],
-      "properties": {
-        "executorId": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "linkedUserId": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "isActive": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExecutorDeletedPayload": {
-      "type": "object",
-      "required": [
-        "executorId"
-      ],
-      "properties": {
-        "executorId": {
-          "$ref": "#/$defs/Uuid"
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExecutorLinkedPayload": {
-      "type": "object",
-      "required": [
-        "executorId",
-        "userId"
-      ],
-      "properties": {
-        "executorId": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "userId": {
-          "$ref": "#/$defs/Uuid"
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExecutorUnlinkedPayload": {
-      "type": "object",
-      "required": [
-        "executorId"
-      ],
-      "properties": {
-        "executorId": {
           "$ref": "#/$defs/Uuid"
         }
       },
