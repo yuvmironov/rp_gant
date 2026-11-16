@@ -2,7 +2,7 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
-> **Статус:** production VPS обновлён 2026-11-13 до release `7757261` (`PR #160`) после подтверждённой владельцем staging-приёмки. Выполнены rollout и health checks. По явному решению владельца pre-migration backup сохранён только на диске VPS и проверен восстановлением в изолированный PostgreSQL; off-host копии нет — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
+> **Статус:** production VPS обновлён 2026-11-16 до `fd22fa87326f04a9ada69e11a6b8ba1e2d59e169` (`PR #162`) после подтверждённой staging-приёмки. Выполнены rollout и health checks. Backup сохранён только на диске VPS по разовому решению владельца; off-host копии нет. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
 
 ## Требования
 
@@ -76,7 +76,14 @@ curl -fsS https://sync.rp-gant.ru/health/live
 
 ## Последний rollout
 
-- Release: `7757261` (`PR #160`), 2026-11-13; staging acceptance подтверждена владельцем.
+- Release: `fd22fa87326f04a9ada69e11a6b8ba1e2d59e169` (`PR #162`), 2026-11-16; staging acceptance подтверждена владельцем.
+- GitHub CI, contracts, smoke, security/CodeQL и сборка всех image прошли успешно. Новых миграций БД не было; `db-init` завершился успешно.
+- Перед обновлением создан полный PostgreSQL backup `/opt/rp-gant-backups/rp-gant-20261116-delete-users.sql` (786770 bytes, mode `0600`, SHA-256 `b24ebba51eeaeca24b89efb662eab3eb2c899e3f0f5fcc49aaabadf4c747aa73`). Restore drill успешно выполнен в изолированном PostgreSQL: все пять service DB и их таблицы доступны после восстановления.
+- Все контейнеры приложений healthy; API Gateway и Sync health endpoints вернули `ok`, внешний app health endpoint прошёл проверку. Project Service запущен, Kafka topics `rp_gant.events.dlq.project` и `rp_gant.events.replay.project` созданы, consumer group `project` присутствует.
+- Полное удаление доступно только для заблокированных пользователей. Если у пользователя есть принадлежащие ему проекты, API блокирует удаление ответом HTTP 412; передачу владения проектами этот rollout не включает.
+- **Исключение по решению владельца:** backup оставлен только на VPS; off-host копии нет. Это разовое отклонение не отменяет обычное требование runbook к off-host backup.
+
+### Предыдущий rollout: `7757261` (`PR #160`), 2026-11-13
 - GitHub CI, contracts, security и image builds прошли; локальный E2E — 27/27.
 - `db-init` завершился успешно: project `0009_user_only_task_assignments` применён до user `0005_remove_executor_catalog` и `0006_runtime_system_settings`. Перед миграцией guard обнаружил 0 legacy executor assignments; все пять service DB присутствуют.
 - Все сервисные контейнеры healthy; внешний `https://app.rp-gant.ru/health` и Sync `/health/live` вернули HTTP 200. Внутренние Sync `/health/live` и `/health/ready` ответили `ok`/`ready`.
