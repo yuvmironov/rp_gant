@@ -89,7 +89,7 @@ jobs:
           grep -q 'SYNC_DB: rp_gant_sync' /tmp/rp-gant-vps-compose.yaml
           grep -q 'PGHOST: postgres' /tmp/rp-gant-vps-compose.yaml
           grep -q 'PGDATABASE: rp_gant_sync' /tmp/rp-gant-vps-compose.yaml
-          for topic in dlq.notification dlq.audit dlq.sync replay.audit replay.notification replay.sync; do
+          for topic in dlq.project dlq.notification dlq.audit dlq.sync replay.project replay.audit replay.notification replay.sync; do
             grep -Fq "rp_gant.events.$topic" /tmp/rp-gant-vps-compose.yaml
           done
 
