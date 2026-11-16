@@ -2199,7 +2199,7 @@ paths:
           $ref: '#/components/responses/Problem'
         '423':
           description: Удалять можно только заблокированного пользователя
-          $ref: '#/components/responses/Locked'
+          $ref: '#/components/responses/Problem'
   /admin/users/{userId}/roles:
     patch:
       tags:
