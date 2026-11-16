@@ -5,6 +5,7 @@ import { startProjectGrpcServer } from './grpc.js';
 import { createProjectImplementation } from './projects.js';
 import { createUserClient } from './user-client.js';
 import { startOutboxPublisher } from './events/publisher.js';
+import { startProjectConsumer } from './events/consumer.js';
 
 const app = buildApp();
 const db = createPool();
@@ -17,12 +18,23 @@ const grpc = await startProjectGrpcServer({
 });
 app.log.info({ grpcPort: grpc.port }, 'gRPC server started');
 const stopOutbox = startOutboxPublisher(db, process.env, app.metrics);
+const stopConsumer = await startProjectConsumer(db, process.env, app.metrics).catch((error) => {
+  app.log.error(error, 'project consumer failed to start');
+  return async () => {};
+});
 
 try {
   await startService(app, {
-    shutdownHooks: [stopOutbox, grpc.close, () => closePool(db), () => userClient.close()],
+    shutdownHooks: [
+      stopConsumer,
+      stopOutbox,
+      grpc.close,
+      () => closePool(db),
+      () => userClient.close(),
+    ],
   });
 } catch (error) {
+  await stopConsumer();
   await stopOutbox();
   await grpc.close();
   await closePool(db);

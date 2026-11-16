@@ -71,7 +71,7 @@ export function buildApp({
       await instance.register(accessRoutes, { userClient: users });
       await instance.register(syncRoutes, { userClient: users, secret: syncTokenSecret });
       await instance.register(adminRoutes, { userClient: users, projectClient: projects });
-      await instance.register(extraRoutes, { userClient: users });
+      await instance.register(extraRoutes, { userClient: users, projectClient: projects });
       await instance.register(projectRoutes, {
         userClient: users,
         projectClient: projects,

@@ -20,7 +20,7 @@ Production-конфигурация для одного VPS за reverse proxy J
 
 - Caddy (HTTP reverse proxy);
 - PostgreSQL;
-- Kafka в KRaft-режиме; `kafka-init` создаёт canonical topic `rp_gant.events` и DLQ/replay topics для Notification, Audit и Sync;
+- Kafka в KRaft-режиме; `kafka-init` создаёт canonical topic `rp_gant.events` и DLQ/replay topics для Project, Notification, Audit и Sync;
 - API Gateway, User, Project, Notification, Audit, Sync;
 - Nuxt frontend.
 

@@ -84,6 +84,9 @@ services:
           --topic ${KAFKA_TOPIC:-rp_gant.events}.dlq.notification \
           --partitions 6 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.dlq.project \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
           --topic ${KAFKA_TOPIC:-rp_gant.events}.dlq.audit \
           --partitions 6 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
@@ -94,6 +97,9 @@ services:
           --partitions 6 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
           --topic ${KAFKA_TOPIC:-rp_gant.events}.replay.notification \
+          --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC:-rp_gant.events}.replay.project \
           --partitions 6 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
           --topic ${KAFKA_TOPIC:-rp_gant.events}.replay.sync \

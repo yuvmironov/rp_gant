@@ -25,9 +25,47 @@ vi.mock('kafkajs', () => ({
   logLevel: { NOTHING: 0 },
 }));
 
-import { startNotificationConsumer } from '../src/events.js';
+import { processNotificationEvent, startNotificationConsumer } from '../src/events.js';
 
 describe('notification consumer DLQ wiring', () => {
+  it('removes notification data on user.deleted and ignores event replays', async () => {
+    const queries = [];
+    let seen = false;
+    const tx = {
+      query: vi.fn(async (sql, params) => {
+        queries.push({ sql, params });
+        if (sql.includes('SELECT 1 FROM events.processed_events')) {
+          return { rowCount: seen ? 1 : 0, rows: [] };
+        }
+        if (sql.includes('INSERT INTO events.processed_events')) seen = true;
+        return { rowCount: 1, rows: [] };
+      }),
+    };
+    const event = {
+      event_id: '00000000-0000-0000-0000-000000000002',
+      event_type: 'user.deleted',
+      payload: { userId: '00000000-0000-0000-0000-000000000001' },
+    };
+
+    await processNotificationEvent(tx, event);
+    await processNotificationEvent(tx, event);
+
+    expect(queries.map(({ sql }) => sql)).toEqual([
+      expect.stringContaining('SELECT 1 FROM events.processed_events'),
+      expect.stringContaining('DELETE FROM notify.notifications'),
+      expect.stringContaining('DELETE FROM notify.notification_preferences'),
+      expect.stringContaining('DELETE FROM scheduler.reminder_jobs'),
+      expect.stringContaining('DELETE FROM delivery.auth_email_deliveries'),
+      expect.stringContaining(
+        "INSERT INTO events.processed_events (consumer, event_id) VALUES ('notification', $1)",
+      ),
+      expect.stringContaining('SELECT 1 FROM events.processed_events'),
+    ]);
+    expect(queries.slice(1, 5).every(({ params }) => params[0] === event.payload.userId)).toBe(
+      true,
+    );
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.producer.connect.mockResolvedValue(undefined);

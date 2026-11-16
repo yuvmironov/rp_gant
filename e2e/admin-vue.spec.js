@@ -45,7 +45,9 @@ test('admin can create admins and promote users', async ({ page }) => {
     originalMaxPasswordLength === 1024
       ? originalMaxPasswordLength - 1
       : originalMaxPasswordLength + 1;
-  page.on('dialog', (dialog) => dialog.accept());
+  page.on('dialog', async (dialog) => {
+    if (dialog.message().startsWith('Изменения повлияют')) await dialog.accept();
+  });
   for (const value of [updatedMaxPasswordLength, originalMaxPasswordLength]) {
     await maxPasswordLength.fill(String(value));
     const saveResponse = page.waitForResponse(
@@ -79,6 +81,37 @@ test('admin can create admins and promote users', async ({ page }) => {
   await expect(row.locator('td').nth(3)).toHaveText('пользователь');
   await row.getByRole('button', { name: 'Сделать админом' }).click();
   await expect(row.locator('td').nth(3)).toHaveText('админ');
+
+  const deletableEmail = `admin-delete-${suffix}@rp-gant.test`;
+  await userForm.locator('input[placeholder=Email]').fill(deletableEmail);
+  await userForm.locator('input[placeholder=Фамилия]').fill('Delete');
+  await userForm.locator('input[placeholder=Имя]').fill('Me');
+  await userForm.locator('input[type=checkbox]').uncheck();
+  await userForm.getByRole('button', { name: 'Создать' }).click();
+  row = page.locator('tr').filter({ hasText: deletableEmail });
+  await expect(row).toBeVisible();
+  await expect(
+    row.getByRole('button', { name: `Полностью удалить пользователя ${deletableEmail}` }),
+  ).toHaveCount(0);
+  await row.getByRole('button', { name: 'Заблокировать' }).click();
+  await expect(row.locator('td').nth(2)).toContainText('заблокирован');
+  const deleteButton = row.getByRole('button', {
+    name: `Полностью удалить пользователя ${deletableEmail}`,
+  });
+  await expect(deleteButton).toBeVisible();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('без возможности восстановления');
+    expect(dialog.message()).toContain(deletableEmail);
+    await dialog.accept();
+  });
+  const deleteResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/admin/users/`) && response.request().method() === 'DELETE',
+  );
+  await deleteButton.click();
+  expect((await deleteResponse).status()).toBe(204);
+  await expect(row).toHaveCount(0);
+
   await page.goto('/projects');
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);

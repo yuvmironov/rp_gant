@@ -9,7 +9,7 @@ async function requireUser(userClient, request, reply) {
   return { session };
 }
 
-export async function extraRoutes(app, { userClient }) {
+export async function extraRoutes(app, { userClient, projectClient }) {
   app.post('/api/v1/admin/users', async (request, reply) => {
     if (!csrfValid(request)) return forbidden(reply, request);
     const access = await requireAdmin(userClient, request, reply);
@@ -37,11 +37,35 @@ export async function extraRoutes(app, { userClient }) {
     if (!csrfValid(request)) return forbidden(reply, request);
     const access = await requireAdmin(userClient, request, reply);
     if (access.denied) return access.denied;
+    if (request.params.userId === access.session.user_id) {
+      return reply.code(403).type('application/problem+json').send({
+        type: 'https://rp-gant.local/problems/self_delete_forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'Нельзя удалить собственную учетную запись.',
+        instance: request.url,
+        code: 'self_delete_forbidden',
+        traceId: request.id,
+      });
+    }
     try {
+      const ownership = await call(projectClient, 'CheckUserOwnsProjects', {
+        user_id: request.params.userId,
+      });
+      if (ownership.owns_projects || Number(ownership.count ?? 0) > 0) {
+        return reply.code(412).type('application/problem+json').send({
+          type: 'https://rp-gant.local/problems/user_owns_projects',
+          title: 'Precondition Failed',
+          status: 412,
+          detail: 'Сначала передайте все проекты пользователя другому владельцу.',
+          instance: request.url,
+          code: 'user_owns_projects',
+          traceId: request.id,
+        });
+      }
       await call(userClient, 'DeleteUser', {
         user_id: request.params.userId,
         actor_user_id: access.session.user_id,
-        reason: request.body?.reason,
       });
       return reply.code(204).send();
     } catch (error) {
