@@ -43,7 +43,7 @@ describe('audit consumer DLQ wiring', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('commits a processed audit event before allowing Kafka to commit its offset', async () => {
+  it('stores only the deleted user UUID in user.deleted audit metadata', async () => {
     const client = {
       query: vi.fn(async (sql) => {
         if (sql === 'SELECT severity FROM audit.audit_actions WHERE code = $1') {
@@ -72,10 +72,17 @@ describe('audit consumer DLQ wiring', () => {
         offset: '7',
         value: Buffer.from(
           JSON.stringify({
-            event_id: 'event-id',
-            event_type: 'task.updated',
+            event_id: '00000000-0000-0000-0000-000000000003',
+            event_type: 'user.deleted',
             occurred_at: '2026-11-11T12:00:00.000Z',
-            payload: {},
+            entity_type: 'user',
+            entity_id: '00000000-0000-0000-0000-000000000001',
+            source_service: 'user',
+            payload: {
+              userId: '00000000-0000-0000-0000-000000000001',
+              email: 'private@example.test',
+              reason: 'private reason',
+            },
           }),
         ),
       },
@@ -96,6 +103,12 @@ describe('audit consumer DLQ wiring', () => {
       ),
       'COMMIT',
     ]);
+    const auditInsert = client.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO audit.audit_events'),
+    );
+    expect(JSON.parse(auditInsert[1][12])).toEqual({
+      userId: '00000000-0000-0000-0000-000000000001',
+    });
     expect(client.release).toHaveBeenCalledOnce();
     expect(mocks.producer.send).not.toHaveBeenCalled();
     expect(await metrics.registry.metrics()).toContain('events_processed_total{service="audit"} 1');

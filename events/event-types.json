@@ -69,7 +69,9 @@
       "type": "user.deleted",
       "producer": "user",
       "consumers": [
-        "audit"
+        "audit",
+        "project",
+        "notification"
       ],
       "payloadSchema": "payloads.schema.json#/$defs/UserDeletedPayload",
       "status": "implemented"

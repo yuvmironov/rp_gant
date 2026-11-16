@@ -225,7 +225,14 @@ async function toggleBlock(item) {
 }
 
 async function deleteUser(item) {
-  if (!window.confirm(`Delete ${item.email}?`)) return;
+  if (item.status !== 'blocked') return;
+  if (
+    !window.confirm(
+      `Полностью и без возможности восстановления удалить пользователя ${item.email}? Перед удалением убедитесь, что все его проекты переданы другому владельцу.`,
+    )
+  ) {
+    return;
+  }
   await run(async () => {
     await api(`/admin/users/${item.id}`, { method: 'DELETE' });
     await loadUsers();
@@ -377,7 +384,13 @@ onMounted(boot);
                         <button class="btn btn-secondary btn-sm" type="button" @click="toggleBlock(item)">
                           {{ item.status === 'blocked' ? 'Разблокировать' : 'Заблокировать' }}
                         </button>
-                        <button class="btn btn-ghost btn-sm" type="button" @click="deleteUser(item)">Удалить</button>
+                        <button
+                          v-if="item.status === 'blocked'"
+                          class="btn btn-ghost btn-sm"
+                          type="button"
+                          :aria-label="`Полностью удалить пользователя ${item.email}`"
+                          @click="deleteUser(item)"
+                        >Удалить</button>
                       </div>
                     </td>
                   </tr>

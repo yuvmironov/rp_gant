@@ -547,7 +547,7 @@ export async function authRoutes(app, { userClient }) {
         page: { limit, offset },
       });
       return reply.send({
-        items: response.items.map(mapUserSummary),
+        items: (response.items ?? []).map(mapUserSummary),
         page: response.page,
       });
     } catch (error) {

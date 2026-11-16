@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toProtoStruct } from '@rp-gant/service-kit';
 import { buildApp } from '../src/app.js';
 
@@ -40,6 +40,84 @@ const user = {
 };
 
 describe('api-gateway auth routes', () => {
+  it('requires ownership transfer before deleting a user', async () => {
+    const deleteUser = (request, callback) => callback(null, { deleted: true });
+    const userClient = {
+      ValidateSession(_request, callback) {
+        callback(null, { user_id: 'admin-1' });
+      },
+      GetUserRoles(_request, callback) {
+        callback(null, { global_roles: ['GLOBAL_ROLE_APP_ADMIN'] });
+      },
+      DeleteUser: vi.fn(deleteUser),
+    };
+    const projectClient = {
+      CheckUserOwnsProjects: vi.fn((_request, callback) =>
+        callback(null, { owns_projects: true, count: 1 }),
+      ),
+    };
+    const app = build(userClient, projectClient);
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/admin/users/user-2',
+      cookies: { '__Host-session': 'token', '__Host-csrf': 'csrf' },
+      headers: { 'x-csrf-token': 'csrf' },
+    });
+
+    expect(response.statusCode).toBe(412);
+    expect(response.json()).toMatchObject({ code: 'user_owns_projects', status: 412 });
+    expect(projectClient.CheckUserOwnsProjects).toHaveBeenCalledWith(
+      { user_id: 'user-2' },
+      expect.any(Function),
+    );
+    expect(userClient.DeleteUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects self-deletion before checking project ownership', async () => {
+    const userClient = {
+      ValidateSession(_request, callback) {
+        callback(null, { user_id: 'admin-1' });
+      },
+      GetUserRoles(_request, callback) {
+        callback(null, { global_roles: ['GLOBAL_ROLE_APP_ADMIN'] });
+      },
+      DeleteUser: vi.fn(),
+    };
+    const projectClient = { CheckUserOwnsProjects: vi.fn() };
+    const app = build(userClient, projectClient);
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/admin/users/admin-1',
+      cookies: { '__Host-session': 'token', '__Host-csrf': 'csrf' },
+      headers: { 'x-csrf-token': 'csrf' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ code: 'self_delete_forbidden' });
+    expect(projectClient.CheckUserOwnsProjects).not.toHaveBeenCalled();
+    expect(userClient.DeleteUser).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty user list when gRPC omits the empty repeated field', async () => {
+    const app = build({
+      ValidateSession(_request, callback) {
+        callback(null, { user_id: 'admin-1' });
+      },
+      ListUsers(_request, callback) {
+        callback(null, { page: { total: 0, limit: 10, offset: 0 } });
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/users?limit=10&offset=0',
+      cookies: { '__Host-session': 'token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ items: [], page: { total: 0, limit: 10, offset: 0 } });
+  });
+
   it('round-trips system setting values as google.protobuf.Struct', async () => {
     let updateRequest;
     const app = build({

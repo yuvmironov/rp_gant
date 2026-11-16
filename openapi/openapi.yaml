@@ -2195,7 +2195,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '412':
+          description: У пользователя есть принадлежащие ему проекты; сначала передайте владение
           $ref: '#/components/responses/Problem'
+        '423':
+          description: Удалять можно только заблокированного пользователя
+          $ref: '#/components/responses/Locked'
   /admin/users/{userId}/roles:
     patch:
       tags:

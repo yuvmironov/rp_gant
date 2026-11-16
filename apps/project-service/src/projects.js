@@ -1237,6 +1237,24 @@ async function checkPermission(call_, userClient, projectId, permission) {
 
 export function createProjectImplementation({ db, userClient }) {
   return {
+    async CheckUserOwnsProjects(call_, callback) {
+      const userId = String(call_.request.user_id ?? '');
+      if (!userId) {
+        callback(grpcError(status.INVALID_ARGUMENT, 'user_id_required'));
+        return;
+      }
+      try {
+        const result = await db.query(
+          'SELECT count(*)::int AS count FROM project.projects WHERE owner_user_id = $1',
+          [userId],
+        );
+        const count = Number(result.rows[0]?.count ?? 0);
+        callback(null, { owns_projects: count > 0, count });
+      } catch (error) {
+        callback(mapDbError(error));
+      }
+    },
+
     async CreateProject(call_, callback) {
       const name = String(call_.request.name ?? '').trim();
       const description = String(call_.request.description ?? '');

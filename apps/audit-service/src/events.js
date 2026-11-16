@@ -7,6 +7,14 @@ import {
 } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function metadataFor(event) {
+  if (event.event_type !== 'user.deleted') return event.payload ?? {};
+  const userId = String(event.payload?.userId ?? '');
+  return UUID_PATTERN.test(userId) ? { userId } : {};
+}
+
 export async function startAuditConsumer(db, env = process.env, metrics) {
   const kafka = new Kafka({
     clientId: 'audit-consumer',
@@ -68,7 +76,7 @@ export async function startAuditConsumer(db, env = process.env, metrics) {
                   event.event_id,
                   event.source_service ?? 'project',
                   action.rows[0].severity,
-                  JSON.stringify(event.payload ?? {}),
+                  JSON.stringify(metadataFor(event)),
                 ],
               );
               await tx.query(

@@ -2056,37 +2056,46 @@ export function createUserImplementation({
       try {
         client = await db.connect();
         await client.query('BEGIN');
-        const result = await client.query(
-          `UPDATE access.users SET status = 'blocked', updated_at = now()
-           WHERE id = $1 RETURNING id`,
+        const user = await client.query(
+          'SELECT id, email, status FROM access.users WHERE id = $1 FOR UPDATE',
           [userId],
         );
-        if (result.rowCount === 0) {
+        if (user.rowCount === 0) {
           await client.query('ROLLBACK');
           callback(grpcError(status.NOT_FOUND, 'user_not_found'));
           return;
         }
+        if (user.rows[0].status !== 'blocked') {
+          await client.query('ROLLBACK');
+          callback(grpcError(status.FAILED_PRECONDITION, 'user_must_be_blocked'));
+          return;
+        }
+
+        // Invitations can contain the deleted user's email even when another admin created them.
         await client.query(
-          `UPDATE access.user_sessions SET revoked_at = now()
-           WHERE user_id = $1 AND revoked_at IS NULL`,
-          [userId],
+          'DELETE FROM access.invitations WHERE email = $2 OR invited_by_user_id = $1',
+          [userId, user.rows[0].email],
         );
-        await client.query(`DELETE FROM access.user_roles WHERE user_id = $1`, [userId]);
         await client.query(
-          `UPDATE access.project_memberships SET status = 'revoked', revoked_at = now(),
-             revoked_reason = 'member_removed' WHERE user_id = $1 AND status = 'active'`,
-          [userId],
+          'DELETE FROM jobs.auth_email_jobs WHERE user_id = $1 OR recipient_email = $2',
+          [userId, user.rows[0].email],
         );
-        await client.query('COMMIT');
-        await queueUserEvent(db, {
+
+        // The event is part of the same transaction as deletion, so consumers can never miss it.
+        await queueUserEvent(client, {
           aggregateType: 'user',
           aggregateId: userId,
           eventType: 'user.deleted',
           actorUserId,
           entityType: 'user',
           entityId: userId,
-          payload: { userId, reason: String(call.request.reason ?? '') },
-        }).catch(() => {});
+          payload: { userId },
+        });
+        const deleted = await client.query('DELETE FROM access.users WHERE id = $1', [userId]);
+        if (deleted.rowCount !== 1) {
+          throw grpcError(status.NOT_FOUND, 'user_not_found');
+        }
+        await client.query('COMMIT');
         callback(null, { deleted: true });
       } catch (error) {
         if (client) await client.query('ROLLBACK').catch(() => {});

@@ -550,3 +550,95 @@ describe('password reset', () => {
     expect(statements.some(({ sql }) => sql === 'COMMIT')).toBe(true);
   });
 });
+
+function createDeleteUserHarness({ status = 'blocked', isAdmin = true } = {}) {
+  const statements = [];
+  const client = {
+    async query(sql, params = []) {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT id, email, status FROM access.users')) {
+        return status === 'missing'
+          ? { rowCount: 0, rows: [] }
+          : { rowCount: 1, rows: [{ id: 'user-1', email: 'person@example.test', status }] };
+      }
+      if (sql.includes('SELECT role_code') && sql.includes('access.user_roles')) {
+        return { rowCount: 1, rows: [{ role_code: 'app_admin' }] };
+      }
+      if (sql.includes('DELETE FROM access.users')) return { rowCount: 1, rows: [] };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const db = {
+    async query(sql) {
+      if (sql.includes('FROM access.user_roles')) {
+        return { rowCount: isAdmin ? 1 : 0, rows: isAdmin ? [{}] : [] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    async connect() {
+      return client;
+    },
+  };
+  return { service: createUserImplementation({ db }), statements };
+}
+
+describe('full user deletion', () => {
+  it('deletes only blocked users and atomically stores a PII-free outbox event', async () => {
+    const { service, statements } = createDeleteUserHarness();
+    const { error, response } = await invoke(service.DeleteUser, {
+      user_id: 'user-1',
+      actor_user_id: 'admin-1',
+      reason: 'operator provided text must not enter the event',
+    });
+
+    expect(error).toBeNull();
+    expect(response).toEqual({ deleted: true });
+    expect(statements.map(({ sql }) => sql)).toEqual([
+      'BEGIN',
+      'SELECT id, email, status FROM access.users WHERE id = $1 FOR UPDATE',
+      expect.stringContaining('DELETE FROM access.invitations'),
+      expect.stringContaining('DELETE FROM jobs.auth_email_jobs'),
+      expect.stringContaining('SELECT role_code'),
+      expect.stringContaining('INSERT INTO events.outbox_events'),
+      'DELETE FROM access.users WHERE id = $1',
+      'COMMIT',
+    ]);
+    const event = statements.find(({ sql }) => sql.includes('INSERT INTO events.outbox_events'));
+    expect(JSON.parse(event.params[3])).toEqual({ userId: 'user-1' });
+    expect(event.params[3]).not.toContain('person@example.test');
+    expect(event.params[3]).not.toContain('operator provided text');
+  });
+
+  it('rejects an active user without deletion or an event', async () => {
+    const { service, statements } = createDeleteUserHarness({ status: 'active' });
+    const { error } = await invoke(service.DeleteUser, {
+      user_id: 'user-1',
+      actor_user_id: 'admin-1',
+    });
+
+    expect(error.code).toBe(9);
+    expect(error.message).toBe('user_must_be_blocked');
+    expect(statements.some(({ sql }) => sql.includes('DELETE FROM access.users'))).toBe(false);
+    expect(statements.some(({ sql }) => sql.includes('events.outbox_events'))).toBe(false);
+    expect(statements.at(-1).sql).toBe('ROLLBACK');
+  });
+
+  it('rejects self-deletion and non-admin actors before opening a transaction', async () => {
+    const self = createDeleteUserHarness();
+    const selfResult = await invoke(self.service.DeleteUser, {
+      user_id: 'admin-1',
+      actor_user_id: 'admin-1',
+    });
+    expect(selfResult.error.code).toBe(7);
+    expect(self.statements).toEqual([]);
+
+    const nonAdmin = createDeleteUserHarness({ isAdmin: false });
+    const denied = await invoke(nonAdmin.service.DeleteUser, {
+      user_id: 'user-1',
+      actor_user_id: 'actor-1',
+    });
+    expect(denied.error.code).toBe(7);
+    expect(nonAdmin.statements).toEqual([]);
+  });
+});

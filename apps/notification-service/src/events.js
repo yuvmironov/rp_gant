@@ -28,6 +28,86 @@ export async function enqueueDeliveries(db, notificationId, userId, eventType) {
   }
 }
 
+export async function processNotificationEvent(tx, event) {
+  const seen = await tx.query(
+    `SELECT 1 FROM events.processed_events WHERE consumer = 'notification' AND event_id = $1`,
+    [event.event_id],
+  );
+  if (seen.rowCount > 0) return;
+
+  if (event.event_type === 'user.deleted') {
+    const userId = String(event.payload?.userId ?? event.payload?.user_id ?? '');
+    if (!userId) throw new Error('user_deleted_event_missing_user_id');
+    await tx.query('DELETE FROM notify.notifications WHERE recipient_user_id = $1::uuid', [userId]);
+    await tx.query('DELETE FROM notify.notification_preferences WHERE user_id = $1::uuid', [
+      userId,
+    ]);
+    await tx.query('DELETE FROM scheduler.reminder_jobs WHERE user_id = $1::uuid', [userId]);
+    await tx.query('DELETE FROM delivery.auth_email_deliveries WHERE user_id = $1::uuid', [userId]);
+  }
+
+  if (event.event_type === 'task.assignments.changed') {
+    for (const assignment of event.payload?.assignments ?? []) {
+      const assigneeType = assignment.assigneeType ?? assignment.assignee_type;
+      const assigneeId = assignment.assigneeId ?? assignment.assignee_id;
+      if (
+        !['user', 'ASSIGNEE_TYPE_USER'].includes(assigneeType) ||
+        ![
+          'executor',
+          'co_executor',
+          'ASSIGNMENT_ROLE_EXECUTOR',
+          'ASSIGNMENT_ROLE_CO_EXECUTOR',
+        ].includes(assignment.role)
+      ) {
+        continue;
+      }
+      await tx.query(
+        `INSERT INTO notify.notifications
+         (recipient_user_id, project_id, diagram_id, event_type, title, body,
+          entity_type, entity_id, payload)
+       VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid,
+               'task.assigned', 'Вам назначена задача',
+               'Проверьте назначение в Gantt-диаграмме', 'task',
+               NULLIF($4, '')::uuid, $5)`,
+        [
+          assigneeId,
+          event.project_id,
+          event.diagram_id,
+          event.entity_id,
+          { eventId: event.event_id, role: assignment.role },
+        ],
+      );
+    }
+  }
+  if (event.event_type === 'comment.created') {
+    for (const userId of event.payload?.mentionedUserIds ?? []) {
+      await tx.query(
+        `INSERT INTO notify.notifications
+         (recipient_user_id, project_id, diagram_id, event_type, title, body,
+          entity_type, entity_id, payload)
+       VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid,
+               'comment.mentioned', 'Вас упомянули в комментарии',
+               $4, $5, NULLIF($6, '')::uuid, $7)`,
+        [
+          userId,
+          event.project_id,
+          event.diagram_id,
+          String(event.payload?.bodyPreview ?? '').slice(0, 200),
+          event.payload?.entityType ?? '',
+          event.payload?.entityId ?? '',
+          { eventId: event.event_id },
+        ],
+      );
+    }
+  }
+
+  await tx.query(
+    `INSERT INTO events.processed_events (consumer, event_id) VALUES ('notification', $1)
+     ON CONFLICT DO NOTHING`,
+    [event.event_id],
+  );
+}
+
 export async function startNotificationConsumer(db, userClient, env = process.env, metrics) {
   const kafka = new Kafka({
     clientId: 'notification-consumer',
@@ -57,72 +137,7 @@ export async function startNotificationConsumer(db, userClient, env = process.en
             if (!message.value) return;
             const event = JSON.parse(message.value.toString());
             await withTransaction(db, async (tx) => {
-              const seen = await tx.query(
-                `SELECT 1 FROM events.processed_events WHERE consumer = 'notification' AND event_id = $1`,
-                [event.event_id],
-              );
-              if (seen.rowCount > 0) return;
-
-              if (event.event_type === 'task.assignments.changed') {
-                for (const assignment of event.payload?.assignments ?? []) {
-                  const assigneeType = assignment.assigneeType ?? assignment.assignee_type;
-                  const assigneeId = assignment.assigneeId ?? assignment.assignee_id;
-                  const role = assignment.role;
-                  if (
-                    !['user', 'ASSIGNEE_TYPE_USER'].includes(assigneeType) ||
-                    ![
-                      'executor',
-                      'co_executor',
-                      'ASSIGNMENT_ROLE_EXECUTOR',
-                      'ASSIGNMENT_ROLE_CO_EXECUTOR',
-                    ].includes(role)
-                  ) {
-                    continue;
-                  }
-                  await tx.query(
-                    `INSERT INTO notify.notifications
-                     (recipient_user_id, project_id, diagram_id, event_type, title, body,
-                      entity_type, entity_id, payload)
-                   VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid,
-                           'task.assigned', 'Вам назначена задача',
-                           'Проверьте назначение в Gantt-диаграмме', 'task',
-                           NULLIF($4, '')::uuid, $5)`,
-                    [
-                      assigneeId,
-                      event.project_id,
-                      event.diagram_id,
-                      event.entity_id,
-                      { eventId: event.event_id, role: assignment.role },
-                    ],
-                  );
-                }
-              }
-              if (event.event_type === 'comment.created') {
-                for (const userId of event.payload?.mentionedUserIds ?? []) {
-                  await tx.query(
-                    `INSERT INTO notify.notifications
-                     (recipient_user_id, project_id, diagram_id, event_type, title, body,
-                      entity_type, entity_id, payload)
-                   VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid,
-                           'comment.mentioned', 'Вас упомянули в комментарии',
-                           $4, $5, NULLIF($6, '')::uuid, $7)`,
-                    [
-                      userId,
-                      event.project_id,
-                      event.diagram_id,
-                      String(event.payload?.bodyPreview ?? '').slice(0, 200),
-                      event.payload?.entityType ?? '',
-                      event.payload?.entityId ?? '',
-                      { eventId: event.event_id },
-                    ],
-                  );
-                }
-              }
-              await tx.query(
-                `INSERT INTO events.processed_events (consumer, event_id) VALUES ('notification', $1)
-               ON CONFLICT DO NOTHING`,
-                [event.event_id],
-              );
+              await processNotificationEvent(tx, event);
             });
           },
         }),
