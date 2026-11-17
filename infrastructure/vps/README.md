@@ -2,7 +2,7 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
-> **Статус:** production VPS обновлён 2026-11-13 до release `7757261` (`PR #160`) после подтверждённой владельцем staging-приёмки. Выполнены rollout и health checks. По явному решению владельца pre-migration backup сохранён только на диске VPS и проверен восстановлением в изолированный PostgreSQL; off-host копии нет — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
+> **Статус:** production VPS обновлён 2026-11-17 до release `e713ca7` (`PR #164`) после подтверждённой владельцем staging-приёмки. Rollout выполнен без изменений схемы БД; обновлённые сервисы healthy, внешние app и Sync health checks вернули HTTP 200. Pre-rollout backup сохранён на VPS по явному решению владельца; off-host копия и restore drill не выполнялись — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
 
 ## Требования
 
@@ -76,7 +76,16 @@ curl -fsS https://sync.rp-gant.ru/health/live
 
 ## Последний rollout
 
-- Release: `7757261` (`PR #160`), 2026-11-13; staging acceptance подтверждена владельцем.
+- Release: `e713ca7` (`PR #164`), 2026-11-17; staging acceptance подтверждена владельцем.
+- Все GitHub checks прошли. Локально прошли 162 unit-теста, production build, три Playwright E2E spec-файла и проверки качества кода.
+- Пересобраны и перезапущены `api-gateway` и `frontend`; все контейнеры запущены, а контейнеры с настроенными healthchecks healthy. Внешние `https://app.rp-gant.ru/health` и `https://sync.rp-gant.ru/health/live` вернули HTTP 200.
+- Изменений схемы БД не было; `db-init` и миграции не запускались.
+- Pre-rollout полный PostgreSQL backup: `/opt/rp-gant-backups/rp-gant-20261117T113627Z-pre-gantt-rollout.sql` (918600 bytes, mode `0600`, SHA-256 `f0aa64710e8dd8a660e9d0d205d579476bf9afa67feffd1e623ff59d0ead66aa`).
+- **Исключение по решению владельца:** backup сохранён только на VPS; off-host копия и restore drill не выполнялись. Это исключение не отменяет обычное требование runbook.
+- Kubernetes staging rollout не выполнялся.
+
+### Предыдущий rollout: `7757261` (`PR #160`), 2026-11-13
+
 - GitHub CI, contracts, security и image builds прошли; локальный E2E — 27/27.
 - `db-init` завершился успешно: project `0009_user_only_task_assignments` применён до user `0005_remove_executor_catalog` и `0006_runtime_system_settings`. Перед миграцией guard обнаружил 0 legacy executor assignments; все пять service DB присутствуют.
 - Все сервисные контейнеры healthy; внешний `https://app.rp-gant.ru/health` и Sync `/health/live` вернули HTTP 200. Внутренние Sync `/health/live` и `/health/ready` ответили `ok`/`ready`.
