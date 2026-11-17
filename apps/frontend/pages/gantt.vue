@@ -1,4 +1,12 @@
 <script setup>
+import {
+  createGanttTimelineScale,
+  dateOnlyToUtcDay,
+  dateToTimelinePercent,
+  inclusiveDateIntervalPercent,
+  timelineTicks,
+} from '~/utils/gantt-timeline.js';
+
 const projects = ref([]);
 const diagrams = ref([]);
 const projectId = ref('');
@@ -1414,52 +1422,34 @@ function isTaskDoneEarly(task) {
   return Number(task.doneDeltaDays) > 0;
 }
 
-const timelineRange = computed(() => {
-  const tasks = snapshot.value?.tasks ?? [];
-  const dates = tasks
-    .flatMap((task) => [task.startDate, task.effectiveEndDate ?? task.endDate])
-    .filter(Boolean)
-    .map((value) => new Date(value).getTime())
-    .filter((value) => !Number.isNaN(value));
-  const today = new Date();
-  const min = dates.length ? Math.min(...dates, today.getTime()) : today.getTime();
-  const max = dates.length ? Math.max(...dates, today.getTime()) : min + 1000 * 60 * 60 * 24 * 30;
-  return { min, max: Math.max(max, min + 1000 * 60 * 60 * 24 * 7) };
-});
+const timelineRange = computed(() =>
+  createGanttTimelineScale(
+    snapshot.value?.tasks ?? [],
+    snapshot.value?.directions ?? [],
+    new Date(),
+  ),
+);
+const timelineDayWidth = computed(() => `${100 / timelineRange.value.dayCount}%`);
 
-const timelineWeeks = computed(() => {
-  const { min, max } = timelineRange.value;
-  const span = max - min;
-  const bucketCount = 8;
-  return Array.from({ length: bucketCount }, (_, index) => {
-    const start = new Date(min + (span / bucketCount) * index);
-    const end = new Date(min + (span / bucketCount) * (index + 1));
-    return {
-      label: `${start.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}–${end.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}`,
-      left: `${(100 / bucketCount) * index}%`,
-      width: `${100 / bucketCount}%`,
-    };
-  });
-});
+const timelineWeeks = computed(() =>
+  timelineTicks(timelineRange.value).map((tick) => ({
+    ...tick,
+    left: `${tick.left}%`,
+    width: `${tick.width}%`,
+  })),
+);
 
 const weekendColumns = computed(() => {
-  const { min, max } = timelineRange.value;
-  const span = Math.max(max - min, 1000 * 60 * 60 * 24);
-  const dayMs = 1000 * 60 * 60 * 24;
-  const cursor = new Date(min);
-  cursor.setUTCHours(0, 0, 0, 0);
+  const { min, max, span } = timelineRange.value;
   const columns = [];
-  for (let time = cursor.getTime(); time < max; time += dayMs) {
+  for (let time = min; time < max; time += 86_400_000) {
     const day = new Date(time).getUTCDay();
     if (day !== 0 && day !== 6) continue;
-    const left = Math.max(time, min);
-    const right = Math.min(time + dayMs, max);
-    if (right <= left) continue;
     columns.push({
       key: time,
       style: {
-        left: `${((left - min) / span) * 100}%`,
-        width: `${((right - left) / span) * 100}%`,
+        left: `${((time - min) / span) * 100}%`,
+        width: `${(86_400_000 / span) * 100}%`,
       },
     });
   }
@@ -1467,29 +1457,40 @@ const weekendColumns = computed(() => {
 });
 
 const todayLeft = computed(() => {
-  const { min, max } = timelineRange.value;
-  return `${Math.min(100, Math.max(0, ((Date.now() - min) / (max - min)) * 100))}%`;
+  const position = dateToTimelinePercent(new Date(), timelineRange.value) ?? 0;
+  return `${Math.min(100, Math.max(0, position))}%`;
 });
+
+function styleForInterval(interval) {
+  const left = Math.min(100, Math.max(0, interval.left));
+  const right = Math.min(100, Math.max(left, interval.left + interval.width));
+  return { left: `${left}%`, width: `${right - left}%` };
+}
 
 const timelineBars = computed(() => {
   const taskRows = ganttRows.value.filter((row) => row.type === 'task');
   const tasks = taskRows.map((row) => row.task);
-  const { min, max } = timelineRange.value;
-  const span = Math.max(max - min, 1000 * 60 * 60 * 24);
+  const { min, span } = timelineRange.value;
   return taskRows.map((row) => {
     const { task } = row;
-    const start = task.startDate
-      ? new Date(task.startDate).getTime()
-      : min + (span / Math.max(tasks.length, 1)) * row.index;
-    const end = task.effectiveEndDate || task.endDate
-      ? new Date(task.effectiveEndDate ?? task.endDate).getTime()
-      : start + span / Math.max(tasks.length, 1);
+    const interval = inclusiveDateIntervalPercent(
+      task.startDate,
+      task.effectiveEndDate ?? task.endDate,
+      timelineRange.value,
+    );
+    const fallbackStart =
+      dateOnlyToUtcDay(task.startDate) ?? min + (span / Math.max(tasks.length, 1)) * row.index;
+    const barStyle = interval
+      ? styleForInterval(interval)
+      : {
+          left: `${((fallbackStart - min) / span) * 100}%`,
+          width: `${100 / Math.max(tasks.length, 1)}%`,
+        };
     return {
       task,
       style: {
         top: `${row.index * 38 + 8}px`,
-        left: `${Math.min(98, Math.max(0, ((start - min) / span) * 100))}%`,
-        width: `${Math.max(4, Math.min(100, ((end - start) / span) * 100))}%`,
+        ...barStyle,
       },
     };
   });
@@ -1497,22 +1498,19 @@ const timelineBars = computed(() => {
 
 const directionBars = computed(() => {
   const rows = ganttRows.value.filter((row) => row.type === 'direction');
-  const { min, max } = timelineRange.value;
-  const span = Math.max(max - min, 1000 * 60 * 60 * 24);
   return rows
     .map((row) => {
-      const startValue = row.direction.startDate;
-      const endValue = row.direction.endDate;
-      if (!startValue || !endValue) return null;
-      const start = new Date(startValue).getTime();
-      const end = new Date(endValue).getTime();
-      if (Number.isNaN(start) || Number.isNaN(end)) return null;
+      const interval = inclusiveDateIntervalPercent(
+        row.direction.startDate,
+        row.direction.endDate,
+        timelineRange.value,
+      );
+      if (!interval) return null;
       return {
         direction: row.direction,
         style: {
           top: `${row.index * 38 + 8}px`,
-          left: `${Math.min(98, Math.max(0, ((start - min) / span) * 100))}%`,
-          width: `${Math.max(4, Math.min(100, ((end - start) / span) * 100))}%`,
+          ...styleForInterval(interval),
         },
       };
     })
@@ -1648,9 +1646,9 @@ function startBarDrag(event, bar, mode) {
   if (!container || !bar.task.startDate) return;
   const startX = event.clientX;
   const width = container.getBoundingClientRect().width;
-  const { min, max } = timelineRange.value;
-  const dayMs = 1000 * 60 * 60 * 24;
-  const daysInRange = Math.max(1, (max - min) / dayMs);
+  const scale = timelineRange.value;
+  const { dayCount } = scale;
+  const dayMs = 86_400_000;
   const estimatedHours = Number(bar.task.estimatedHours) || 0;
   if (mode === 'end' && estimatedHours > 0) return;
   const originalStart = new Date(bar.task.startDate);
@@ -1658,7 +1656,7 @@ function startBarDrag(event, bar, mode) {
   let moved = false;
   const onMove = (moveEvent) => {
     if (Math.abs(moveEvent.clientX - startX) > 3) moved = true;
-    const deltaDays = Math.round(((moveEvent.clientX - startX) / width) * daysInRange);
+    const deltaDays = Math.round(((moveEvent.clientX - startX) / width) * dayCount);
     let start = originalStart;
     let end = originalEnd;
     if (mode === 'move') {
@@ -1682,14 +1680,12 @@ function startBarDrag(event, bar, mode) {
       if (autoEnd) end = new Date(`${autoEnd}T00:00:00Z`);
     }
     const previewEnd = snapWorkday(end.toISOString().slice(0, 10), -1);
-    const previewStartMs = new Date(previewStart).getTime();
-    const previewEndMs = new Date(previewEnd).getTime();
-    const span = Math.max(max - min, dayMs);
+    const previewInterval = inclusiveDateIntervalPercent(previewStart, previewEnd, scale);
+    if (!previewInterval) return;
     barDragPreview.value = {
       taskId: bar.task.id,
       top: bar.style.top,
-      left: `${Math.min(98, Math.max(0, ((previewStartMs - min) / span) * 100))}%`,
-      width: `${Math.max(2, Math.min(100, ((previewEndMs - previewStartMs) / span) * 100))}%`,
+      ...styleForInterval(previewInterval),
       start: previewStart,
       end: previewEnd,
       label: `${formatShortDate(previewStart)}–${formatShortDate(previewEnd)}`,
@@ -1753,7 +1749,13 @@ async function exportPdf() {
 }
 
 function formatShortDate(value) {
-  return value ? new Date(value).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
+  return value
+    ? new Date(value).toLocaleDateString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        timeZone: 'UTC',
+      })
+    : '';
 }
 
 function statusBadgeClass(statusValue) {
@@ -2415,12 +2417,20 @@ onMounted(async () => {
             <div class="gantt-month">План</div>
             <div
               v-for="week in timelineWeeks"
-              :key="week.left"
+              :key="week.key"
               class="gantt-week"
               :style="{ left: week.left, width: week.width }"
             >{{ week.label }}</div>
           </div>
-          <div ref="canvasRef" class="gantt-canvas" :style="{ minHeight: `${Math.max(320, ganttRows.length * 38 + 24)}px`, minWidth: `${900 * zoom}px` }">
+          <div
+            ref="canvasRef"
+            class="gantt-canvas"
+            :style="{
+              minHeight: `${Math.max(320, ganttRows.length * 38 + 24)}px`,
+              minWidth: `${900 * zoom}px`,
+              '--timeline-day-width': timelineDayWidth,
+            }"
+          >
             <span class="gantt-today" :style="{ left: todayLeft }"></span>
             <span v-for="column in weekendColumns" :key="column.key" class="weekend-column" :style="column.style"></span>
             <svg v-if="showDependencies" class="deps-overlay">
@@ -3237,11 +3247,13 @@ onMounted(async () => {
 .gantt-timeline::-webkit-scrollbar-track { background: var(--color-surface-subtle); border-top: 1px solid var(--color-border); }
 .gantt-timeline::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
 .gantt-timeline::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-.gantt-time-head { display: grid; grid-template-columns: 1.2fr repeat(8, 1fr); height: 56px; min-height: 56px; max-height: 56px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-subtle); font-size: 11px; color: var(--color-text-muted); }
+.gantt-time-head { position: relative; display: block; height: 56px; min-height: 56px; max-height: 56px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-subtle); font-size: 11px; color: var(--color-text-muted); }
 .gantt-time-head > * { display: flex; align-items: center; padding: 0 8px; border-right: 1px solid var(--color-border); }
+.gantt-time-head .gantt-month { position: absolute; top: 0; left: 0; height: 28px; padding: 4px 8px; border-right: 0; }
+.gantt-time-head .gantt-week { position: absolute; top: 28px; bottom: 0; box-sizing: border-box; overflow: hidden; padding: 0 4px; white-space: nowrap; }
 .deps-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; overflow: visible; }
 .dep-hit { pointer-events: stroke; cursor: pointer; }
-.gantt-canvas { position: relative; background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(14.285% - 1px), var(--color-border) calc(14.285% - 1px), var(--color-border) 14.285%); }
+.gantt-canvas { position: relative; background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--timeline-day-width) - 1px), var(--color-border) calc(var(--timeline-day-width) - 1px), var(--color-border) var(--timeline-day-width)); }
 .gantt-today { position: absolute; top: 0; bottom: 0; left: 50%; border-left: 2px solid var(--color-danger); z-index: 1; }
 .gantt-today::before { content: "Сегодня"; position: absolute; top: 2px; left: 4px; padding: 1px 4px; border-radius: 4px; background: var(--color-surface); color: var(--color-danger); font-size: 10px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow-xs); }
 .weekend-column { position: absolute; top: 0; bottom: 0; background: rgb(148 163 184 / 18%); border-right: 1px solid rgb(100 116 139 / 10%); pointer-events: none; z-index: 0; }

@@ -40,11 +40,14 @@ export function applySchedule(snapshot, dayMode, holidayItems) {
   const effectiveEndCache = new Map();
   function effectiveEnd(task) {
     if (effectiveEndCache.has(task.id)) return effectiveEndCache.get(task.id);
-    const own = toDate(task.endDate);
-    const childEnds = (childrenByParent.get(task.id) ?? [])
-      .map((child) => effectiveEnd(child))
-      .filter(Boolean);
-    const result = [own, ...childEnds].filter(Boolean).sort((a, b) => b - a)[0] ?? null;
+    const children = childrenByParent.get(task.id) ?? [];
+    let result = toDate(task.endDate);
+    if (children.length) {
+      result = children
+        .map((child) => effectiveEnd(child))
+        .filter(Boolean)
+        .reduce((latest, end) => (!latest || end > latest ? end : latest), null);
+    }
     effectiveEndCache.set(task.id, result);
     return result;
   }
@@ -103,7 +106,7 @@ export function applySchedule(snapshot, dayMode, holidayItems) {
       .sort((a, b) => b - a)[0];
     const ownStart = toDate(direction.startDate);
     const ownEnd = toDate(direction.endDate);
-    const resolvedEnd = ownEnd && end ? new Date(Math.max(ownEnd, end)) : (ownEnd ?? end);
+    const resolvedEnd = directionTasks.length ? end : ownEnd;
     return {
       ...direction,
       tasksCount: directionTasks.length,
