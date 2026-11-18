@@ -2,7 +2,7 @@
 
 Production-конфигурация для одного VPS за reverse proxy Jino.
 
-> **Статус:** production VPS обновлён 2026-11-17 до release `e713ca7` (`PR #164`) после подтверждённой владельцем staging-приёмки. Rollout выполнен без изменений схемы БД; обновлённые сервисы healthy, внешние app и Sync health checks вернули HTTP 200. Pre-rollout backup сохранён на VPS по явному решению владельца; off-host копия и restore drill не выполнялись — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Сводка: [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
+> **Статус:** production VPS обновлён 2026-11-18 до release `8d598ea` (`PR #166`) после подтверждённой владельцем staging-приёмки. Все контейнеры с настроенными healthchecks healthy; внешние app и Sync health endpoints вернули HTTP 200. Pre-rollout PostgreSQL backup сохранён только на VPS по явному решению владельца; off-host копия и restore drill не выполнялись — это исключение не отменяет обычное требование runbook. Kubernetes staging deployment не выполнялся. Подробности: [последний rollout](#последний-rollout) и [`IMPLEMENTATION-STATUS.md`](../../docs/IMPLEMENTATION-STATUS.md).
 
 ## Требования
 
@@ -76,11 +76,12 @@ curl -fsS https://sync.rp-gant.ru/health/live
 
 ## Последний rollout
 
-- Release: `e713ca7` (`PR #164`), 2026-11-17; staging acceptance подтверждена владельцем.
-- Все GitHub checks прошли. Локально прошли 162 unit-теста, production build, три Playwright E2E spec-файла и проверки качества кода.
-- Пересобраны и перезапущены `api-gateway` и `frontend`; все контейнеры запущены, а контейнеры с настроенными healthchecks healthy. Внешние `https://app.rp-gant.ru/health` и `https://sync.rp-gant.ru/health/live` вернули HTTP 200.
-- Изменений схемы БД не было; `db-init` и миграции не запускались.
-- Pre-rollout полный PostgreSQL backup: `/opt/rp-gant-backups/rp-gant-20261117T113627Z-pre-gantt-rollout.sql` (918600 bytes, mode `0600`, SHA-256 `f0aa64710e8dd8a660e9d0d205d579476bf9afa67feffd1e623ff59d0ead66aa`).
+- Release: `8d598ea` (`PR #166`), 2026-11-18; staging acceptance подтверждена владельцем.
+- Все GitHub checks прошли. Локально прошли E2E-тесты (30/30), `pnpm lint`, `pnpm format:check`, `git diff --check` и production dependency audit.
+- `db-init` завершился успешно; release не добавляет новых файлов миграций.
+- Полная сборка `docker compose up -d --build` остановилась на зависшей установке зависимостей неизменённого `audit-service`, до обновления контейнеров. Затронутые образы `project-service`, `notification-service`, `api-gateway` и `frontend` собраны последовательно с использованием build cache; пересозданы только эти четыре сервиса, их зависимости оставлены работающими.
+- После rollout все контейнеры с настроенными healthchecks healthy. Внешние `https://app.rp-gant.ru/health` и `https://sync.rp-gant.ru/health/live` вернули HTTP 200.
+- Pre-rollout полный PostgreSQL backup всех БД: `/opt/rp-gant-backups/rp-gant-20261118T171814Z-pre-pr166.sql` (918600 bytes, mode `0600`, SHA-256 `e66062bb57ea4038a2be05e82f8ec5e38bd55f73b13ccbb12bf09164d37ba298`).
 - **Исключение по решению владельца:** backup сохранён только на VPS; off-host копия и restore drill не выполнялись. Это исключение не отменяет обычное требование runbook.
 - Kubernetes staging rollout не выполнялся.
 
