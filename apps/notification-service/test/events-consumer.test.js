@@ -28,6 +28,85 @@ vi.mock('kafkajs', () => ({
 import { processNotificationEvent, startNotificationConsumer } from '../src/events.js';
 
 describe('notification consumer DLQ wiring', () => {
+  it('notifies active owners, managers, and responsible users when the critical path changes', async () => {
+    const insertions = [];
+    const tx = {
+      query: vi.fn(async (sql, params) => {
+        if (sql.includes('SELECT 1 FROM events.processed_events')) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('INSERT INTO notify.notifications')) insertions.push({ sql, params });
+        return { rowCount: 1, rows: [] };
+      }),
+    };
+    const members = [
+      {
+        user_id: 'owner-id',
+        role: 'PROJECT_ROLE_OWNER',
+        status: 'active',
+        user: { status: 'USER_STATUS_ACTIVE' },
+      },
+      {
+        user_id: 'manager-id',
+        role: 'PROJECT_ROLE_MANAGER',
+        status: 'active',
+        user: { status: 'USER_STATUS_ACTIVE' },
+      },
+      {
+        user_id: 'responsible-id',
+        role: 'PROJECT_ROLE_EDITOR',
+        status: 'active',
+        user: { status: 'USER_STATUS_ACTIVE' },
+      },
+      {
+        user_id: 'inactive-id',
+        role: 'PROJECT_ROLE_OWNER',
+        status: 'revoked',
+        user: { status: 'USER_STATUS_ACTIVE' },
+      },
+    ];
+    const userClient = {
+      ListProjectMembers(request, callback) {
+        expect(request).toMatchObject({
+          project_id: 'project-id',
+          page: { limit: 200, offset: 0 },
+        });
+        callback(null, { items: members, page: { total: members.length } });
+      },
+    };
+    const event = {
+      event_id: 'event-id',
+      event_type: 'diagram.critical_path.changed',
+      project_id: 'project-id',
+      diagram_id: 'diagram-id',
+      payload: {
+        criticalTaskIds: ['task-a', 'task-b'],
+        previousCriticalTaskIds: ['task-a'],
+        responsibleUserIds: ['responsible-id', 'not-a-member-id'],
+      },
+    };
+
+    await processNotificationEvent(tx, event, userClient);
+
+    expect(insertions.map(({ params }) => params[0])).toEqual([
+      'owner-id',
+      'manager-id',
+      'responsible-id',
+    ]);
+    expect(insertions.every(({ sql }) => sql.includes("'critical_path_changed'"))).toBe(true);
+    expect(insertions[0].params[4]).toMatchObject({
+      criticalTaskCount: 2,
+      criticalTaskIds: ['task-a', 'task-b'],
+      previousCriticalTaskIds: ['task-a'],
+    });
+    expect(tx.query).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        "INSERT INTO events.processed_events (consumer, event_id) VALUES ('notification', $1)",
+      ),
+      ['event-id'],
+    );
+  });
+
   it('removes notification data on user.deleted and ignores event replays', async () => {
     const queries = [];
     let seen = false;

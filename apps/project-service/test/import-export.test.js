@@ -34,6 +34,7 @@ describe('standalone assignment import/export compatibility', () => {
             ownerId: ids.legacyOwner,
             execId: ids.executor,
             coId: ids.coExecutor,
+            estimatedHours: 24,
           },
           { id: '1.2', level: 2, type: 'Задача', task: 'Legacy task', ownerId: ids.legacyOwner },
         ],
@@ -53,6 +54,7 @@ describe('standalone assignment import/export compatibility', () => {
     expect(payload.tasks[1].assignments).toEqual([
       { role: 'executor', assigneeType: 'user', assigneeId: ids.legacyOwner },
     ]);
+    expect(payload.tasks[0].estimatedHours).toBe(24);
     expect(importReport.issues).toContain('task_responsible_conflicts_with_executor:1.1');
     expect(
       payload.tasks.flatMap((task) => task.assignments).some((item) => item.role === 'responsible'),
@@ -79,10 +81,10 @@ describe('standalone assignment import/export compatibility', () => {
   it('imports legacy CSV owner/executor columns into context-specific roles', () => {
     const importReport = report();
     const csv = [
-      'WBS ID;Наименование;Родитель;Уровень;Тип;Ответственный направления;Исполнитель;Соисполнитель',
-      `1;Direction;;1;Направление;${ids.directionOwner};;`,
-      `1.1;Task;1;2;Задача;;${ids.executor};${ids.coExecutor}`,
-      `1.2;Legacy task;1;2;Задача;${ids.legacyOwner};;`,
+      'WBS ID;Наименование;Родитель;Уровень;Тип;Ответственный направления;Исполнитель;Соисполнитель;Оценка, ч',
+      `1;Direction;;1;Направление;${ids.directionOwner};;;`,
+      `1.1;Task;1;2;Задача;;${ids.executor};${ids.coExecutor};12,5`,
+      `1.2;Legacy task;1;2;Задача;${ids.legacyOwner};;;`,
     ].join('\n');
 
     const payload = standaloneCsvToPayload(csv, importReport, new Map(), activeMembers);
@@ -94,6 +96,7 @@ describe('standalone assignment import/export compatibility', () => {
       { role: 'executor', assigneeType: 'user', assigneeId: ids.executor },
       { role: 'co_executor', assigneeType: 'user', assigneeId: ids.coExecutor },
     ]);
+    expect(payload.tasks[0].estimatedHours).toBe(12.5);
     expect(payload.tasks[1].assignments).toEqual([
       { role: 'executor', assigneeType: 'user', assigneeId: ids.legacyOwner },
     ]);

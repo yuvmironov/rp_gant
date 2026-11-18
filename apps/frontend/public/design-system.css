@@ -1237,11 +1237,6 @@ body.shot .demo-switcher {
   background: #cbd5e1;
 }
 
-.gantt-bar.critical {
-  outline: 1.5px solid #0f172a;
-  outline-offset: 1px;
-}
-
 .gantt-bar-label {
   position: absolute;
   left: 7px;

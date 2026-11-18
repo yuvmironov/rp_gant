@@ -13,3 +13,4 @@ export function clamp(value, min, max) {
 }
 
 export { signSyncToken, verifySyncToken } from './sync-token.js';
+export { calculateCriticalPath, countScheduleDays } from './critical-path.js';

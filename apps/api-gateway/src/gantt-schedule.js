@@ -1,3 +1,5 @@
+import { calculateCriticalPath, countScheduleDays } from '@rp-gant/shared';
+
 const DAY_MS = 86_400_000;
 
 function toDate(value) {
@@ -10,18 +12,8 @@ function dateKey(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function addDays(date, days) {
-  return new Date(date.getTime() + days * DAY_MS);
-}
-
 function countDays(start, end, mode, holidays) {
-  if (!start || !end || end < start) return 0;
-  if (mode !== 'working') return Math.floor((end - start) / DAY_MS) + 1;
-  let count = 0;
-  for (let current = start; current <= end; current = addDays(current, 1)) {
-    if (!holidays.has(dateKey(current)) && ![0, 6].includes(current.getUTCDay())) count += 1;
-  }
-  return count;
+  return countScheduleDays(start, end, mode, holidays);
 }
 
 export function applySchedule(snapshot, dayMode, holidayItems) {
@@ -124,23 +116,35 @@ export function applySchedule(snapshot, dayMode, holidayItems) {
     };
   });
 
-  const graph = buildGraph(enrichedTasks, snapshot.dependencies ?? []);
+  const criticalPath = calculateCriticalPath({
+    tasks: enrichedTasks,
+    directions: enrichedDirections,
+    dependencies: snapshot.dependencies ?? [],
+    dayMode: mode,
+    holidays: holidayItems,
+  });
+  const taskMetrics = new Map(criticalPath.taskMetrics.map((item) => [item.id, item]));
+  const directionMetrics = new Map(criticalPath.directionMetrics.map((item) => [item.id, item]));
+  const criticalDependencyIds = new Set(criticalPath.criticalDependencyIds);
   const issuedTasks = enrichedTasks.map((task) => {
-    const node = graph.nodes.get(task.id);
+    const metrics = taskMetrics.get(task.id);
     return {
       ...task,
-      float: node?.float ?? null,
-      isCritical: Boolean(node?.critical),
+      float: metrics?.float ?? null,
+      isCritical: Boolean(metrics?.isCritical),
     };
   });
-  const issuedById = new Map(issuedTasks.map((task) => [task.id, task.id]));
+  const issuedDirections = enrichedDirections.map((direction) => {
+    const metrics = directionMetrics.get(direction.id);
+    return {
+      ...direction,
+      float: metrics?.float ?? null,
+      isCritical: Boolean(metrics?.isCritical),
+    };
+  });
   const dependencies = (snapshot.dependencies ?? []).map((dependency) => ({
     ...dependency,
-    isCritical:
-      issuedById.has(dependency.predecessorId) &&
-      issuedById.has(dependency.successorId) &&
-      Boolean(graph.nodes.get(dependency.predecessorId)?.critical) &&
-      Boolean(graph.nodes.get(dependency.successorId)?.critical),
+    isCritical: criticalDependencyIds.has(dependency.id),
   }));
 
   const counts = issuedTasks.reduce(
@@ -184,7 +188,7 @@ export function applySchedule(snapshot, dayMode, holidayItems) {
   return {
     ...snapshot,
     tasks: issuedTasks,
-    directions: enrichedDirections,
+    directions: issuedDirections,
     dependencies,
     schedule: {
       mode,
@@ -197,76 +201,15 @@ export function applySchedule(snapshot, dayMode, holidayItems) {
               issuedTasks.length,
           )
         : 0,
-      criticalTaskIds: issuedTasks.filter((task) => task.isCritical).map((task) => task.id),
-      cycles: graph.cycles,
+      criticalPathDurationDays: criticalPath.criticalPathDurationDays,
+      criticalTaskIds: criticalPath.criticalTaskIds,
+      criticalDependencyIds: criticalPath.criticalDependencyIds,
+      calculationStatus: criticalPath.calculationStatus,
+      unknownDurationTaskIds: criticalPath.unknownDurationTaskIds,
+      invalidDependencyIds: criticalPath.invalidDependencyIds,
+      issues: criticalPath.issues,
+      cycles: criticalPath.cycles,
       counts,
     },
   };
-}
-
-function buildGraph(tasks, dependencies) {
-  const nodes = new Map();
-  const edges = dependencies
-    .filter(
-      (dependency) => dependency.predecessorType === 'task' && dependency.successorType === 'task',
-    )
-    .filter(
-      (dependency) =>
-        tasks.some((task) => task.id === dependency.predecessorId) &&
-        tasks.some((task) => task.id === dependency.successorId),
-    );
-  for (const task of tasks) {
-    const start = toDate(task.startDate);
-    const end = toDate(task.effectiveEndDate ?? task.endDate);
-    nodes.set(task.id, {
-      task,
-      duration: start && end ? Math.max(1, Math.round((end - start) / DAY_MS) + 1) : 1,
-      earlyStart: 0,
-      earlyFinish: 0,
-      lateStart: 0,
-      lateFinish: 0,
-      float: 0,
-      critical: false,
-    });
-  }
-  const indegree = new Map(tasks.map((task) => [task.id, 0]));
-  const outgoing = new Map(tasks.map((task) => [task.id, []]));
-  for (const edge of edges) {
-    outgoing.get(edge.predecessorId).push(edge.successorId);
-    indegree.set(edge.successorId, (indegree.get(edge.successorId) ?? 0) + 1);
-  }
-  const queue = tasks.filter((task) => (indegree.get(task.id) ?? 0) === 0).map((task) => task.id);
-  const order = [];
-  while (queue.length) {
-    const id = queue.shift();
-    order.push(id);
-    for (const next of outgoing.get(id) ?? []) {
-      indegree.set(next, (indegree.get(next) ?? 0) - 1);
-      if (indegree.get(next) === 0) queue.push(next);
-    }
-  }
-  const cycles = order.length === tasks.length ? [] : ['dependency_cycle'];
-  for (const id of order) {
-    const node = nodes.get(id);
-    const earlyStart = Math.max(
-      0,
-      ...edges
-        .filter((edge) => edge.successorId === id)
-        .map((edge) => nodes.get(edge.predecessorId)?.earlyFinish ?? 0),
-    );
-    node.earlyStart = earlyStart;
-    node.earlyFinish = earlyStart + node.duration;
-  }
-  const projectFinish = Math.max(0, ...[...nodes.values()].map((node) => node.earlyFinish));
-  for (const id of [...order].reverse()) {
-    const node = nodes.get(id);
-    const lateFinish = outgoing.get(id)?.length
-      ? Math.min(...outgoing.get(id).map((next) => nodes.get(next).lateStart))
-      : projectFinish;
-    node.lateFinish = lateFinish;
-    node.lateStart = lateFinish - node.duration;
-    node.float = node.lateStart - node.earlyStart;
-    node.critical = node.float <= 0;
-  }
-  return { nodes, cycles };
 }

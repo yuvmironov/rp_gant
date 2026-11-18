@@ -80,7 +80,7 @@ check(
   staleMapping.length === 0,
   `REST/gRPC mapping has unknown operations: ${staleMapping.join(', ')}`,
 );
-check(Object.keys(openapi.components?.schemas ?? {}).length === 75, 'OpenAPI schemas: expected 75');
+check(Object.keys(openapi.components?.schemas ?? {}).length === 77, 'OpenAPI schemas: expected 77');
 const taskAssignmentInput =
   openapi.paths?.['/tasks/{taskId}/assignments']?.put?.requestBody?.content?.['application/json']
     ?.schema?.properties?.assignments;

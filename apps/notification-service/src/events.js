@@ -5,6 +5,7 @@ import {
   withTransaction,
 } from '@rp-gant/service-kit';
 import { Kafka, logLevel } from 'kafkajs';
+import { call } from './user-client.js';
 
 export async function enqueueDeliveries(db, notificationId, userId, eventType) {
   const prefs = await db.query(
@@ -28,7 +29,41 @@ export async function enqueueDeliveries(db, notificationId, userId, eventType) {
   }
 }
 
-export async function processNotificationEvent(tx, event) {
+async function criticalPathRecipients(userClient, event) {
+  const responsibleIds = new Set(event.payload?.responsibleUserIds ?? []);
+  const recipients = new Set();
+  if (userClient && event.project_id) {
+    let offset = 0;
+    let total = Infinity;
+    while (offset < total) {
+      const response = await call(userClient, 'ListProjectMembers', {
+        project_id: event.project_id,
+        page: { limit: 200, offset },
+      });
+      const items = response.items ?? [];
+      for (const member of items) {
+        const userId = member.user_id;
+        if (
+          member.status !== 'active' ||
+          member.user?.status === 'USER_STATUS_BLOCKED' ||
+          !userId
+        ) {
+          continue;
+        }
+        if (['PROJECT_ROLE_OWNER', 'PROJECT_ROLE_MANAGER'].includes(member.role)) {
+          recipients.add(userId);
+        }
+        if (responsibleIds.has(userId)) recipients.add(userId);
+      }
+      total = Number(response.page?.total ?? items.length);
+      offset += items.length;
+      if (!items.length) break;
+    }
+  }
+  return [...recipients];
+}
+
+export async function processNotificationEvent(tx, event, userClient = null) {
   const seen = await tx.query(
     `SELECT 1 FROM events.processed_events WHERE consumer = 'notification' AND event_id = $1`,
     [event.event_id],
@@ -79,6 +114,36 @@ export async function processNotificationEvent(tx, event) {
       );
     }
   }
+  if (event.event_type === 'diagram.critical_path.changed') {
+    const recipients = await criticalPathRecipients(userClient, event);
+    const criticalTaskIds = event.payload?.criticalTaskIds ?? [];
+    const previousCriticalTaskIds = event.payload?.previousCriticalTaskIds ?? [];
+    const actionUrl = `/gantt?project=${encodeURIComponent(event.project_id ?? '')}&diagram=${encodeURIComponent(event.diagram_id ?? '')}`;
+    for (const userId of recipients) {
+      await tx.query(
+        `INSERT INTO notify.notifications
+         (recipient_user_id, project_id, diagram_id, event_type, title, body,
+          entity_type, entity_id, payload)
+       VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid,
+               'critical_path_changed', 'Изменился критический путь', $4,
+               'diagram', NULLIF($3, '')::uuid, $5)`,
+        [
+          userId,
+          event.project_id,
+          event.diagram_id,
+          `Критический путь изменился. Критических задач: ${criticalTaskIds.length}. ${actionUrl}`,
+          {
+            eventId: event.event_id,
+            criticalTaskIds,
+            previousCriticalTaskIds,
+            criticalTaskCount: criticalTaskIds.length,
+            actionUrl,
+          },
+        ],
+      );
+    }
+  }
+
   if (event.event_type === 'comment.created') {
     for (const userId of event.payload?.mentionedUserIds ?? []) {
       await tx.query(
@@ -137,7 +202,7 @@ export async function startNotificationConsumer(db, userClient, env = process.en
             if (!message.value) return;
             const event = JSON.parse(message.value.toString());
             await withTransaction(db, async (tx) => {
-              await processNotificationEvent(tx, event);
+              await processNotificationEvent(tx, event, userClient);
             });
           },
         }),

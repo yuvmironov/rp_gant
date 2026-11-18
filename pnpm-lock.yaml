@@ -86,6 +86,9 @@ importers:
       '@rp-gant/service-kit':
         specifier: workspace:*
         version: link:../../packages/service-kit
+      '@rp-gant/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       kafkajs:
         specifier: 2.2.4
         version: 2.2.4

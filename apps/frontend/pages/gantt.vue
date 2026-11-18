@@ -6,6 +6,11 @@ import {
   inclusiveDateIntervalPercent,
   timelineTicks,
 } from '~/utils/gantt-timeline.js';
+import {
+  buildDependencyLines,
+  GANTT_BAR_HEIGHT,
+  GANTT_ROW_HEIGHT,
+} from '~/utils/gantt-dependencies.js';
 
 const projects = ref([]);
 const diagrams = ref([]);
@@ -1170,24 +1175,34 @@ const projectMembersUrl = computed(
   () => `/members?project=${encodeURIComponent(projectId.value)}`,
 );
 
-const ganttRows = computed(() => {
+const taskFilterState = computed(() => {
   const query = filterQuery.value.trim().toLowerCase();
   const filtering = Boolean(query || filterStatus.value || selectedExecutor.value);
+  const tasks = snapshot.value?.tasks ?? [];
+  const matchedTaskIds = new Set(
+    tasks
+      .filter((task) => {
+        const matchesQuery =
+          !query ||
+          task.name?.toLowerCase().includes(query) ||
+          task.wbsCode?.toLowerCase().includes(query);
+        const matchesStatus = !filterStatus.value || task.status === filterStatus.value;
+        const matchesExecutor =
+          !selectedExecutor.value ||
+          (task.assignments ?? []).some(
+            (assignment) =>
+              assignment.role === 'executor' && assignment.assigneeId === selectedExecutor.value,
+          );
+        return matchesQuery && matchesStatus && matchesExecutor;
+      })
+      .map((task) => task.id),
+  );
+  return { filtering, matchedTaskIds };
+});
+
+const ganttRows = computed(() => {
+  const { filtering, matchedTaskIds: matched } = taskFilterState.value;
   const allTasks = snapshot.value?.tasks ?? [];
-  const matches = (task) => {
-    const matchesQuery =
-      !query ||
-      task.name?.toLowerCase().includes(query) ||
-      task.wbsCode?.toLowerCase().includes(query);
-    const matchesStatus = !filterStatus.value || task.status === filterStatus.value;
-    const matchesExecutor =
-      !selectedExecutor.value ||
-      (task.assignments ?? []).some(
-        (assignment) => assignment.role === 'executor' && assignment.assigneeId === selectedExecutor.value,
-      );
-    return matchesQuery && matchesStatus && matchesExecutor;
-  };
-  const matched = new Set(allTasks.filter(matches).map((task) => task.id));
   const byId = new Map(allTasks.map((task) => [task.id, task]));
   const context = new Set(matched);
   if (filtering) {
@@ -1467,6 +1482,8 @@ function styleForInterval(interval) {
   return { left: `${left}%`, width: `${right - left}%` };
 }
 
+const ganttCanvasHeight = computed(() => Math.max(320, ganttRows.value.length * GANTT_ROW_HEIGHT + 24));
+
 const timelineBars = computed(() => {
   const taskRows = ganttRows.value.filter((row) => row.type === 'task');
   const tasks = taskRows.map((row) => row.task);
@@ -1489,7 +1506,8 @@ const timelineBars = computed(() => {
     return {
       task,
       style: {
-        top: `${row.index * 38 + 8}px`,
+        top: `${row.index * GANTT_ROW_HEIGHT + 8}px`,
+        height: `${GANTT_BAR_HEIGHT}px`,
         ...barStyle,
       },
     };
@@ -1498,18 +1516,40 @@ const timelineBars = computed(() => {
 
 const directionBars = computed(() => {
   const rows = ganttRows.value.filter((row) => row.type === 'direction');
+  const taskIntervalsByDirection = new Map();
+  for (const task of snapshot.value?.tasks ?? []) {
+    const start = dateOnlyToUtcDay(task.startDate);
+    const end = dateOnlyToUtcDay(task.effectiveEndDate ?? task.endDate ?? task.startDate);
+    if (start === null || end === null || end < start) continue;
+    const interval = taskIntervalsByDirection.get(task.directionId) ?? { start: Infinity, end: -Infinity };
+    interval.start = Math.min(interval.start, start);
+    interval.end = Math.max(interval.end, end);
+    taskIntervalsByDirection.set(task.directionId, interval);
+  }
+
   return rows
     .map((row) => {
-      const interval = inclusiveDateIntervalPercent(
+      let interval = inclusiveDateIntervalPercent(
         row.direction.startDate,
         row.direction.endDate,
         timelineRange.value,
       );
+      if (!interval) {
+        const envelope = taskIntervalsByDirection.get(row.direction.id);
+        if (envelope) {
+          interval = inclusiveDateIntervalPercent(
+            new Date(envelope.start).toISOString().slice(0, 10),
+            new Date(envelope.end).toISOString().slice(0, 10),
+            timelineRange.value,
+          );
+        }
+      }
       if (!interval) return null;
       return {
         direction: row.direction,
         style: {
-          top: `${row.index * 38 + 8}px`,
+          top: `${row.index * GANTT_ROW_HEIGHT + 8}px`,
+          height: `${GANTT_BAR_HEIGHT}px`,
           ...styleForInterval(interval),
         },
       };
@@ -1517,58 +1557,40 @@ const directionBars = computed(() => {
     .filter(Boolean);
 });
 
-const dependencyLines = computed(() => {
-  const taskBars = new Map(timelineBars.value.map((bar) => [`task:${bar.task.id}`, bar]));
-  const directionBarsById = new Map(
-    directionBars.value.map((bar) => [`direction:${bar.direction.id}`, bar]),
-  );
-  const findBar = (type, id) => taskBars.get(`${type}:${id}`) ?? directionBarsById.get(`${type}:${id}`);
-  return (snapshot.value?.dependencies ?? [])
-    .map((dependency) => {
-      const from = findBar(dependency.predecessorType, dependency.predecessorId);
-      const to = findBar(dependency.successorType, dependency.successorId);
-      if (!from || !to) return null;
-      const fromLeft = Number.parseFloat(from.style.left);
-      const fromWidth = Number.parseFloat(from.style.width);
-      const fromTop = Number.parseFloat(from.style.top) + 14;
-      const toLeft = Number.parseFloat(to.style.left);
-      const toTop = Number.parseFloat(to.style.top) + 14;
-      const x1 = ((fromLeft + fromWidth) / 100) * canvasWidth.value;
-      const y1 = fromTop;
-      const x2 = (toLeft / 100) * canvasWidth.value;
-      const y2 = toTop;
-      const midX = (x1 + x2) / 2;
-      const shape = dependency.arrowShape || 'orthogonal';
-      const backward = x2 < x1;
-      const laneRight = Math.max(x1, Math.min(canvasWidth.value - 2, x1 + 24));
-      const laneLeft = Math.min(x2, Math.max(2, x2 - 24));
-      const midY = (y1 + y2) / 2;
-      const path =
-        shape === 'straight'
-          ? `M ${x1} ${y1} L ${x2} ${y2}`
-          : shape === 'curved'
-            ? backward
-              ? `M ${x1} ${y1} C ${laneRight} ${y1}, ${laneLeft} ${y2}, ${x2} ${y2}`
-              : `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`
-            : backward
-              ? `M ${x1} ${y1} L ${laneRight} ${y1} L ${laneRight} ${midY} L ${laneLeft} ${midY} L ${laneLeft} ${y2} L ${x2} ${y2}`
-              : `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
-      return {
-        id: dependency.id,
-        dependency,
-        path,
-        x1,
-        y1,
-        x2,
-        y2,
-        critical: dependency.isCritical,
-        color: dependency.color || '#94a3b8',
-        dash: dependency.lineStyle,
-        shape,
-      };
-    })
-    .filter(Boolean);
+const directionAnchors = computed(() => {
+  const visibleBars = new Map(directionBars.value.map((bar) => [bar.direction.id, bar]));
+  return ganttRows.value
+    .filter((row) => row.type === 'direction')
+    .map((row) =>
+      visibleBars.get(row.direction.id) ?? {
+        direction: row.direction,
+        style: {
+          top: `${row.index * GANTT_ROW_HEIGHT + 8}px`,
+          left: '0%',
+          width: '0%',
+        },
+      },
+    );
 });
+
+const dependencyDisplay = computed(() =>
+  buildDependencyLines({
+    dependencies: snapshot.value?.dependencies ?? [],
+    tasks: snapshot.value?.tasks ?? [],
+    directions: snapshot.value?.directions ?? [],
+    rows: ganttRows.value,
+    taskBars: timelineBars.value,
+    directionBars: directionBars.value,
+    directionAnchors: directionAnchors.value,
+    canvasWidth: canvasWidth.value,
+    canvasHeight: ganttCanvasHeight.value,
+    filtering: taskFilterState.value.filtering,
+    matchedTaskIds: taskFilterState.value.matchedTaskIds,
+  }),
+);
+const dependencyLines = computed(() => dependencyDisplay.value.lines);
+const filteredDependencyCount = computed(() => dependencyDisplay.value.filteredOutCount);
+const unresolvedDependencyCount = computed(() => dependencyDisplay.value.unresolvedCount);
 
 const hoveredTaskIds = computed(() => {
   const dependency = (snapshot.value?.dependencies ?? []).find(
@@ -2246,6 +2268,12 @@ onMounted(async () => {
                 · готовность {{ snapshot.schedule.overallProgress }}% · {{ formatShortDate(snapshot.schedule.projectStart) }}–{{
                   formatShortDate(snapshot.schedule.projectEnd)
                 }}
+                <template v-if="snapshot.schedule.calculationStatus === 'complete' && snapshot.schedule.criticalPathDurationDays != null">
+                  · критический путь {{ snapshot.schedule.criticalPathDurationDays }} {{ snapshot.schedule.mode === 'working' ? 'раб. дн.' : 'кал. дн.' }}
+                </template>
+                <template v-else-if="snapshot.schedule.calculationStatus === 'incomplete'">
+                  · критический путь: неполный расчёт
+                </template>
               </template>
             </div>
           </div>
@@ -2277,6 +2305,12 @@ onMounted(async () => {
           </option>
         </select>
         <button v-if="filterQuery || filterStatus || selectedExecutor" class="gantt-chip" type="button" @click="filterQuery = ''; filterStatus = ''; selectedExecutor = ''">Сбросить</button>
+        <span v-if="filteredDependencyCount" class="gantt-chip dependency-filter-note" :title="`${filteredDependencyCount} связей скрыто, потому что один или оба конца не подходят под фильтр`">
+          Скрыто связей: {{ filteredDependencyCount }}
+        </span>
+        <span v-if="unresolvedDependencyCount" class="gantt-chip dependency-filter-note" :title="`${unresolvedDependencyCount} связей невозможно отобразить из-за отсутствующего конца или недопустимого типа`">
+          Не отображено связей: {{ unresolvedDependencyCount }}
+        </span>
         <button class="gantt-chip" type="button" @click="openDependency()">Связи</button>
         <button class="gantt-chip" :class="{ active: linkMode }" type="button" @click="toggleLinkMode">Связать</button>
         <span v-if="linkMode" class="gantt-chip active link-hint">
@@ -2289,6 +2323,7 @@ onMounted(async () => {
           }}
         </span>
         <label class="gantt-chip"><input v-model="showDependencies" type="checkbox" /> Стрелки</label>
+        <span class="gantt-chip critical-path-legend"><span class="critical-path-swatch"></span>Критический путь</span>
         <button class="gantt-chip" type="button" @click="openCalendarModal">Календарь</button>
         <button class="gantt-chip" type="button" @click="changeZoom(-0.25)">−</button>
         <span class="gantt-chip">{{ Math.round(zoom * 100) }}%</span>
@@ -2302,7 +2337,13 @@ onMounted(async () => {
       </div>
 
       <p v-if="loading" class="muted">Загрузка...</p>
-      <p v-if="snapshot?.schedule?.cycles?.length" class="error">Обнаружен цикл зависимостей — проверьте связи.</p>
+      <p v-if="snapshot?.schedule?.cycles?.length" class="error">Обнаружен цикл зависимостей — критический путь не рассчитан; проверьте связи.</p>
+      <p v-else-if="snapshot?.schedule?.calculationStatus === 'incomplete'" class="error">
+        Расчёт критического пути неполный: нет корректной длительности у {{ snapshot.schedule.unknownDurationTaskIds?.length || 0 }} задач. Проверьте даты и оценки часов.
+      </p>
+      <p v-else-if="snapshot?.schedule?.calculationStatus === 'invalid'" class="error">
+        Критический путь не рассчитан: обнаружена некорректная связь или иерархия.
+      </p>
   
 
       <section v-if="!loading && !projects.length" class="card empty-project">
@@ -2426,39 +2467,15 @@ onMounted(async () => {
             ref="canvasRef"
             class="gantt-canvas"
             :style="{
-              minHeight: `${Math.max(320, ganttRows.length * 38 + 24)}px`,
+              minHeight: `${ganttCanvasHeight}px`,
               minWidth: `${900 * zoom}px`,
               '--timeline-day-width': timelineDayWidth,
             }"
           >
             <span class="gantt-today" :style="{ left: todayLeft }"></span>
             <span v-for="column in weekendColumns" :key="column.key" class="weekend-column" :style="column.style"></span>
-            <svg v-if="showDependencies" class="deps-overlay">
-              <defs>
-                <marker
-                  v-for="line in dependencyLines"
-                  :id="`dep-arrow-${line.id}`"
-                  :key="`arrow-${line.id}`"
-                  markerWidth="7"
-                  markerHeight="7"
-                  refX="6"
-                  refY="3.5"
-                  orient="auto"
-                >
-                  <path d="M0,0 L7,3.5 L0,7 Z" :fill="line.critical ? '#dc2626' : line.color" />
-                </marker>
-              </defs>
-              <g v-for="line in dependencyLines" :key="line.id">
-                <path
-                  class="dep-line"
-                  :d="line.path"
-                  fill="none"
-                  :stroke="line.critical ? '#dc2626' : line.color"
-                  :stroke-dasharray="line.dash === 'dashed' ? '6 4' : line.dash === 'dotted' ? '2 4' : ''"
-                  :stroke-linecap="line.dash === 'dotted' ? 'round' : 'butt'"
-                  :stroke-width="hoveredDependencyId === line.id ? 2.8 : 1.4"
-                  :marker-end="`url(#dep-arrow-${line.id})`"
-                />
+            <svg v-if="showDependencies" class="deps-hit-overlay">
+              <g v-for="line in dependencyLines" :key="`hit-${line.id}`">
                 <path
                   class="dep-hit"
                   :d="line.path"
@@ -2471,11 +2488,51 @@ onMounted(async () => {
                 />
               </g>
             </svg>
+            <svg v-if="showDependencies" class="deps-overlay">
+              <defs>
+                <marker
+                  v-for="line in dependencyLines"
+                  :id="`dep-arrow-${line.id}`"
+                  :key="`arrow-${line.id}`"
+                  markerWidth="7"
+                  markerHeight="7"
+                  refX="6"
+                  refY="3.5"
+                  orient="auto"
+                >
+                  <path d="M0,0 L7,3.5 L0,7 Z" :fill="line.critical ? 'var(--color-danger-600)' : line.color" />
+                </marker>
+              </defs>
+              <g v-for="line in dependencyLines" :key="line.id">
+                <path
+                  v-if="line.routeMode === 'straight' || line.routeMode === 'fallback-visible'"
+                  class="dep-line-halo"
+                  :d="line.path"
+                  fill="none"
+                  :stroke-dasharray="line.dash === 'dashed' ? '6 4' : line.dash === 'dotted' ? '2 4' : ''"
+                />
+                <path
+                  class="dep-line"
+                  :class="{ 'dep-line-straight': line.routeMode === 'straight' || line.routeMode === 'fallback-visible' }"
+                  :data-route-mode="line.routeMode"
+                  :data-source-key="line.sourceKey"
+                  :data-target-key="line.targetKey"
+                  :title="line.routeMode === 'fallback-visible' ? 'Свободный обход невозможен; связь показана поверх полос' : line.routeMode === 'curved-fallback-orthogonal' ? 'Для обхода полос кривая связь показана ортогональным маршрутом' : ''"
+                  :d="line.path"
+                  fill="none"
+                  :stroke="line.critical ? 'var(--color-danger-600)' : line.color"
+                  :stroke-dasharray="line.dash === 'dashed' ? '6 4' : line.dash === 'dotted' ? '2 4' : ''"
+                  :stroke-linecap="line.dash === 'dotted' ? 'round' : 'butt'"
+                  :stroke-width="hoveredDependencyId === line.id ? 2.8 : 1.4"
+                  :marker-end="`url(#dep-arrow-${line.id})`"
+                />
+              </g>
+            </svg>
             <div
               v-for="bar in directionBars"
               :key="`direction-bar-${bar.direction.id}`"
               class="gantt-bar direction-bar"
-              :class="[bar.direction.status, { 'link-source': isLinkSource('direction', bar.direction.id) }]"
+              :class="[bar.direction.status, { critical: bar.direction.isCritical, 'link-source': isLinkSource('direction', bar.direction.id) }]"
               :style="bar.style"
               @click="onDirectionBarClick(bar.direction)"
             >
@@ -2489,7 +2546,7 @@ onMounted(async () => {
               v-for="bar in timelineBars"
               :key="bar.task.id"
               class="gantt-bar"
-              :class="[bar.task.status, { critical: bar.task.isCritical, dragging: barDragPreview?.taskId === bar.task.id, 'link-source': isLinkSource('task', bar.task.id), 'dep-linked': hoveredTaskIds.has(bar.task.id) }]"
+              :class="[bar.task.status, { critical: bar.task.isCritical, dragging: barDragPreview?.taskId === bar.task.id, 'link-source': isLinkSource('task', bar.task.id) }]"
               :style="bar.style"
               @pointerdown="startBarDrag($event, bar, 'move')"
               @mouseenter="showBarTooltip($event, bar.task)"
@@ -3121,7 +3178,7 @@ onMounted(async () => {
         <span class="bar-tooltip-key">Комментарии:</span> {{ barTooltip.task.commentsCount }}
       </div>
       <div v-if="barTooltip.task.isCritical" class="bar-tooltip-bad">Критическая задача</div>
-      <div v-else-if="barTooltip.task.float != null">
+      <div v-if="barTooltip.task.float != null">
         <span class="bar-tooltip-key">Резерв:</span> {{ barTooltip.task.float }} дн.
       </div>
     </div>
@@ -3202,7 +3259,6 @@ onMounted(async () => {
 .gantt-bar.direction-bar.blocked { background: #991b1b; border-color: #7f1d1d; }
 .gantt-bar.dragging { opacity: 0.28; }
 .gantt-bar.link-source { outline: 3px solid #2563eb; outline-offset: 2px; box-shadow: 0 0 0 5px rgb(37 99 235 / 18%); }
-.gantt-bar.dep-linked { outline: 3px solid #0ea5e9; outline-offset: 2px; box-shadow: 0 0 0 5px rgb(14 165 233 / 20%); z-index: 5; }
 .gantt-row-label.link-source { background: #dbeafe; outline: 2px solid #60a5fa; outline-offset: -2px; }
 .gantt-row-label.dep-linked { background: #e0f2fe; box-shadow: inset 3px 0 0 #0ea5e9; }
 .link-hint { border-style: dashed; }
@@ -3212,7 +3268,8 @@ onMounted(async () => {
 .bar-tooltip-good { color: #4ade80; font-weight: 700; }
 .bar-tooltip-bad { color: #fca5a5; font-weight: 700; }
 .gantt-bar-preview { position: absolute; height: 28px; z-index: 6; display: flex; align-items: center; padding: 0 8px; border: 2px dashed #2563eb; border-radius: var(--radius-md); background: rgb(219 234 254 / 82%); color: #1d4ed8; font-size: 11px; pointer-events: none; box-shadow: 0 4px 12px rgb(37 99 235 / 18%); }
-.gantt-bar.critical { border-width: 2px; border-color: #dc2626; }
+.critical-path-legend { display: inline-flex; align-items: center; gap: 6px; }
+.critical-path-swatch { display: inline-block; width: 13px; height: 9px; border: 2px solid var(--color-danger-600); border-radius: 3px; }
 .gantt-row-label.task .label-meta { flex-wrap: nowrap; justify-content: flex-end; overflow: hidden; }
 .gantt-row-label.direction .caret { color: var(--color-text-muted); }
 .gantt-row-label .caret {
@@ -3251,13 +3308,16 @@ onMounted(async () => {
 .gantt-time-head > * { display: flex; align-items: center; padding: 0 8px; border-right: 1px solid var(--color-border); }
 .gantt-time-head .gantt-month { position: absolute; top: 0; left: 0; height: 28px; padding: 4px 8px; border-right: 0; }
 .gantt-time-head .gantt-week { position: absolute; top: 28px; bottom: 0; box-sizing: border-box; overflow: hidden; padding: 0 4px; white-space: nowrap; }
-.deps-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; overflow: visible; }
+.deps-hit-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+.deps-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; overflow: visible; }
+.dep-line-halo { stroke: var(--color-surface); stroke-width: 5px; stroke-linecap: round; pointer-events: none; }
 .dep-hit { pointer-events: stroke; cursor: pointer; }
 .gantt-canvas { position: relative; background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--timeline-day-width) - 1px), var(--color-border) calc(var(--timeline-day-width) - 1px), var(--color-border) var(--timeline-day-width)); }
 .gantt-today { position: absolute; top: 0; bottom: 0; left: 50%; border-left: 2px solid var(--color-danger); z-index: 1; }
 .gantt-today::before { content: "Сегодня"; position: absolute; top: 2px; left: 4px; padding: 1px 4px; border-radius: 4px; background: var(--color-surface); color: var(--color-danger); font-size: 10px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow-xs); }
 .weekend-column { position: absolute; top: 0; bottom: 0; background: rgb(148 163 184 / 18%); border-right: 1px solid rgb(100 116 139 / 10%); pointer-events: none; z-index: 0; }
 .gantt-bar { position: absolute; height: 28px; border-radius: var(--radius-md); background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; cursor: pointer; overflow: hidden; z-index: 2; }
+.dependency-filter-note { cursor: help; }
 .gantt-bar .fill { position: absolute; inset: 0 auto 0 0; background: rgb(37 99 235 / 18%); }
 .gantt-bar-label { position: relative; z-index: 1; display: block; padding: 5px 8px; font-size: 11px; white-space: nowrap; }
 .gantt-bar.done { background: #dcfce7; border-color: #86efac; color: #15803d; }

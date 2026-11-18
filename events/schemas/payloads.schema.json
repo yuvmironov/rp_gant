@@ -1241,7 +1241,8 @@
         "diagramId",
         "revision",
         "criticalTaskIds",
-        "previousCriticalTaskIds"
+        "previousCriticalTaskIds",
+        "responsibleUserIds"
       ],
       "properties": {
         "diagramId": {
@@ -1258,6 +1259,12 @@
           }
         },
         "previousCriticalTaskIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          }
+        },
+        "responsibleUserIds": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/Uuid"

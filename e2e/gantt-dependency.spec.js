@@ -51,14 +51,84 @@ test('backward dependency is routed outside task bars', async ({ page }) => {
       lineStyle: 'solid',
       arrowShape: 'orthogonal',
     });
+    const alignedPredecessor = await post(`/diagrams/${diagram.id}/tasks`, {
+      directionId: direction.id,
+      name: 'Aligned predecessor',
+      startDate: '2026-11-06',
+      endDate: '2026-11-06',
+    });
+    const alignedSuccessor = await post(`/diagrams/${diagram.id}/tasks`, {
+      directionId: direction.id,
+      name: 'Aligned successor',
+      startDate: '2026-11-07',
+      endDate: '2026-11-08',
+    });
+    await post(`/diagrams/${diagram.id}/dependencies`, {
+      predecessorType: 'task',
+      predecessorId: alignedPredecessor.id,
+      successorType: 'task',
+      successorId: alignedSuccessor.id,
+      lineStyle: 'solid',
+      arrowShape: 'orthogonal',
+    });
     return { projectId: project.id, diagramId: diagram.id };
   });
 
   await page.goto(`/gantt?project=${ids.projectId}&diagram=${ids.diagramId}`);
-  await expect(page.locator('.dep-line')).toHaveCount(1);
+  await expect(page.locator('.dep-line')).toHaveCount(2);
 
-  const intersectsBar = await page.evaluate(() => {
-    const path = document.querySelector('.dep-line');
+  const adjacentEndpoints = await page.evaluate(async () => {
+    const diagramId = new URL(document.URL).searchParams.get('diagram');
+    const snapshot = await fetch(`/api/v1/diagrams/${diagramId}/snapshot`).then((response) =>
+      response.json(),
+    );
+    const predecessorId = snapshot.tasks.find((task) => task.name === 'Aligned predecessor').id;
+    const successorId = snapshot.tasks.find((task) => task.name === 'Aligned successor').id;
+    const dependencyIndex = snapshot.dependencies.findIndex(
+      (dependency) =>
+        dependency.predecessorId === predecessorId && dependency.successorId === successorId,
+    );
+    const line = document.querySelectorAll('.dep-line')[dependencyIndex];
+    const matrix = line.getScreenCTM();
+    const start = line.getPointAtLength(0).matrixTransform(matrix);
+    const end = line.getPointAtLength(line.getTotalLength()).matrixTransform(matrix);
+    const taskRows = [...document.querySelectorAll('.gantt-row-label.task')];
+    const taskBars = [...document.querySelectorAll('.gantt-bar:not(.direction-bar)')];
+    const predecessorIndex = taskRows.findIndex((row) =>
+      row.textContent.includes('Aligned predecessor'),
+    );
+    const successorIndex = taskRows.findIndex((row) =>
+      row.textContent.includes('Aligned successor'),
+    );
+    const predecessor = taskBars[predecessorIndex];
+    const successor = taskBars[successorIndex];
+    return {
+      startY: start.y,
+      predecessorBottom: predecessor.getBoundingClientRect().bottom,
+      endX: end.x,
+      endY: end.y,
+      successorLeft: successor.getBoundingClientRect().left,
+      successorTop: successor.getBoundingClientRect().top,
+    };
+  });
+  expect(adjacentEndpoints.startY).toBeGreaterThan(adjacentEndpoints.predecessorBottom);
+  expect(adjacentEndpoints.startY - adjacentEndpoints.predecessorBottom).toBeLessThanOrEqual(3);
+  expect(Math.abs(adjacentEndpoints.endX - adjacentEndpoints.successorLeft)).toBeLessThan(1);
+  expect(adjacentEndpoints.endY).toBeLessThan(adjacentEndpoints.successorTop);
+  expect(adjacentEndpoints.successorTop - adjacentEndpoints.endY).toBeLessThanOrEqual(7);
+
+  const intersectsBar = await page.evaluate(async () => {
+    const diagramId = new URL(document.URL).searchParams.get('diagram');
+    const snapshot = await fetch(`/api/v1/diagrams/${diagramId}/snapshot`).then((response) =>
+      response.json(),
+    );
+    const predecessorId = snapshot.tasks.find((task) => task.name === 'Predecessor').id;
+    const successorId = snapshot.tasks.find((task) => task.name === 'Successor').id;
+    const dependencyIndex = snapshot.dependencies.findIndex(
+      (dependency) =>
+        dependency.predecessorId === predecessorId && dependency.successorId === successorId,
+    );
+    const path = document.querySelectorAll('.dep-line')[dependencyIndex];
     const matrix = path.getScreenCTM();
     const bars = [...document.querySelectorAll('.gantt-bar:not(.direction-bar)')].map((bar) => {
       const rect = bar.getBoundingClientRect();

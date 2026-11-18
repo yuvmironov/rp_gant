@@ -404,6 +404,8 @@ function standaloneExport(snapshotData, format) {
       start: direction.startDate?.slice(0, 10) ?? null,
       end: direction.effectiveEndDate ?? direction.endDate?.slice(0, 10) ?? null,
       days: direction.days ?? 0,
+      float: direction.float ?? null,
+      isCritical: Boolean(direction.isCritical),
       status: statusRu[direction.status] ?? direction.status,
       percentComplete: direction.progress ?? 0,
       priority: priorityRu[direction.priority] ?? direction.priority,
@@ -426,6 +428,9 @@ function standaloneExport(snapshotData, format) {
       start: task.startDate?.slice(0, 10) ?? null,
       end: task.effectiveEndDate ?? task.endDate?.slice(0, 10) ?? null,
       days: task.days ?? 0,
+      estimatedHours: task.estimatedHours ?? null,
+      float: task.float ?? null,
+      isCritical: Boolean(task.isCritical),
       status: statusRu[task.status] ?? task.status,
       percentComplete: task.progress ?? 0,
       priority: priorityRu[task.priority] ?? task.priority,
@@ -451,6 +456,9 @@ function standaloneExport(snapshotData, format) {
       'Окончание',
       'Дни',
       'Рабочие дни',
+      'Оценка, ч',
+      'Критический путь',
+      'Резерв, дн.',
       'Статус',
       'Процент',
       'Приоритет',
@@ -481,6 +489,9 @@ function standaloneExport(snapshotData, format) {
           task.end,
           task.days,
           '',
+          task.estimatedHours,
+          task.isCritical ? 'да' : 'нет',
+          task.float,
           task.status,
           task.percentComplete,
           task.priority,
@@ -499,6 +510,7 @@ function standaloneExport(snapshotData, format) {
       ),
       `# project ${snapshot.diagram?.name ?? ''}`,
       `# workdays ${JSON.stringify({ mode: snapshot.diagram?.dayMode === 'working' ? 'workdays' : 'calendar', holidays: snapshot.holidays.map((holiday) => ({ date: holiday.holidayDate, name: holiday.name })) })}`,
+      `# criticalpath ${JSON.stringify({ status: snapshot.schedule.calculationStatus, durationDays: snapshot.schedule.criticalPathDurationDays })}`,
       `# depstyles ${JSON.stringify(depStyles)}`,
     ];
     return {
@@ -522,6 +534,11 @@ function standaloneExport(snapshotData, format) {
       })),
     },
     depStyles,
+    criticalPath: {
+      status: snapshot.schedule.calculationStatus,
+      durationDays: snapshot.schedule.criticalPathDurationDays,
+      criticalTaskIds: snapshot.schedule.criticalTaskIds.map((id) => byId.get(id)).filter(Boolean),
+    },
     tasks,
   };
   return {

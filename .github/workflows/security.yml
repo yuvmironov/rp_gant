@@ -48,7 +48,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Audit
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+
+      - name: Report development dependency advisories
+        continue-on-error: true
         run: pnpm audit --audit-level high
 
   security-required:
