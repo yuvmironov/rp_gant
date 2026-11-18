@@ -205,7 +205,8 @@ test('nuxt gantt page renders tasks and edit modal', async ({ page }) => {
   const straightPath = await page.locator('.dep-line').first().getAttribute('d');
   expect((straightPath.match(/L/g) ?? []).length).toBe(1);
   await page.locator('.dep-hit').first().dispatchEvent('mouseenter');
-  await expect(page.locator('.gantt-bar.dep-linked')).toHaveCount(2);
+  await expect(page.locator('.gantt-row-label.dep-linked')).toHaveCount(2);
+  await expect(page.locator('.gantt-bar.dep-linked')).toHaveCount(0);
   await page.locator('.gantt-toolbar button').filter({ hasText: 'Связи' }).click();
   await expect(page.locator('.dependency-manager')).toBeVisible();
   await expect(page.locator('.dependency-list-item')).toHaveCount(1);
