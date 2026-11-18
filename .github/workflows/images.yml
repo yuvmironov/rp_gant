@@ -41,7 +41,7 @@ jobs:
 
       - name: Build and push
         if: ${{ hashFiles(format('apps/{0}/Dockerfile', matrix.app)) != '' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
