@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { status } from '@grpc/grpc-js';
+import { calculateCriticalPath } from '@rp-gant/shared';
 import { call } from './user-client.js';
 import { actorRolesFromPermissionRole, queueEvent } from './events/outbox.js';
 
@@ -164,6 +165,165 @@ async function loadHolidayDates(db, diagramId) {
     [diagramId],
   );
   return new Set(result.rows.map((row) => dateOnly(row.holiday_date)).filter(Boolean));
+}
+
+async function loadCriticalPath(db, diagramId) {
+  const diagram = await db.query(
+    `SELECT day_mode FROM project.diagrams WHERE id = $1 AND deleted_at IS NULL`,
+    [diagramId],
+  );
+  if (diagram.rowCount === 0) return null;
+  const [directions, tasks, dependencies, holidays] = await Promise.all([
+    db.query(`SELECT id FROM plan.directions WHERE diagram_id = $1 AND deleted_at IS NULL`, [
+      diagramId,
+    ]),
+    db.query(
+      `SELECT id, direction_id, parent_task_id, start_date, end_date, estimated_hours
+       FROM plan.tasks WHERE diagram_id = $1 AND deleted_at IS NULL`,
+      [diagramId],
+    ),
+    db.query(`SELECT * FROM plan.dependencies WHERE diagram_id = $1`, [diagramId]),
+    db.query(`SELECT holiday_date FROM plan.diagram_holidays WHERE diagram_id = $1`, [diagramId]),
+  ]);
+  return calculateCriticalPath({
+    dayMode: diagram.rows[0].day_mode,
+    directions: directions.rows.map((direction) => ({ id: direction.id })),
+    tasks: tasks.rows.map((task) => ({
+      id: task.id,
+      directionId: task.direction_id,
+      parentTaskId: task.parent_task_id,
+      startDate: dateOnly(task.start_date),
+      endDate: dateOnly(task.end_date),
+      estimatedHours: Number(task.estimated_hours ?? 0),
+    })),
+    dependencies: dependencies.rows.map((dependency) => ({
+      id: dependency.id,
+      predecessorType: dependency.predecessor_type,
+      predecessorId: dependency.predecessor_id,
+      successorType: dependency.successor_type,
+      successorId: dependency.successor_id,
+    })),
+    holidays: holidays.rows.map((holiday) => dateOnly(holiday.holiday_date)),
+  });
+}
+
+function trustedCriticalTaskIds(result) {
+  return result?.calculationStatus === 'complete' ? [...result.criticalTaskIds].toSorted() : [];
+}
+
+export async function queueCriticalPathChange(
+  db,
+  { diagramId, before, after: calculatedAfter, actorId, actorRoles = [] },
+) {
+  const after = calculatedAfter ?? (await loadCriticalPath(db, diagramId));
+  if (!after) return { changed: false, criticalPath: null, revision: null };
+
+  const previousCriticalTaskIds = trustedCriticalTaskIds(before);
+  const criticalTaskIds = trustedCriticalTaskIds(after);
+  if (
+    previousCriticalTaskIds.length === criticalTaskIds.length &&
+    previousCriticalTaskIds.every((taskId, index) => taskId === criticalTaskIds[index])
+  ) {
+    return { changed: false, criticalPath: after, revision: null };
+  }
+
+  const revisionResult = await db.query(
+    `UPDATE project.diagrams
+     SET current_revision = current_revision + 1
+     WHERE id = $1
+     RETURNING project_id, current_revision`,
+    [diagramId],
+  );
+  if (revisionResult.rowCount === 0) return { changed: false, criticalPath: after, revision: null };
+  const revision = Number(revisionResult.rows[0].current_revision);
+  const responsible = await db.query(
+    `SELECT DISTINCT assignment.assignee_id
+     FROM plan.assignments assignment
+     WHERE assignment.assignee_type = 'user'
+       AND assignment.role = 'responsible'
+       AND (
+         (assignment.entity_type = 'task' AND EXISTS (
+           SELECT 1 FROM plan.tasks task
+           WHERE task.id = assignment.entity_id AND task.diagram_id = $1 AND task.deleted_at IS NULL
+         ))
+         OR (assignment.entity_type = 'direction' AND EXISTS (
+           SELECT 1 FROM plan.directions direction
+           WHERE direction.id = assignment.entity_id AND direction.diagram_id = $1 AND direction.deleted_at IS NULL
+         ))
+       )
+     ORDER BY assignment.assignee_id`,
+    [diagramId],
+  );
+  const responsibleUserIds = responsible.rows.map((row) => row.assignee_id);
+  await queueEvent(db, {
+    aggregateType: 'diagram',
+    aggregateId: diagramId,
+    eventType: 'diagram.critical_path.changed',
+    actorUserId: actorId,
+    actorRoles,
+    projectId: revisionResult.rows[0].project_id,
+    diagramId,
+    entityType: 'diagram',
+    entityId: diagramId,
+    payload: {
+      diagramId,
+      revision,
+      criticalTaskIds,
+      previousCriticalTaskIds,
+      responsibleUserIds,
+    },
+  });
+  return { changed: true, criticalPath: after, revision };
+}
+
+async function rollbackPreservingError(client, error) {
+  try {
+    await client.query('ROLLBACK');
+  } catch (rollbackError) {
+    if (error && typeof error === 'object') {
+      try {
+        error.rollbackError = rollbackError;
+      } catch {
+        // Keep the mutation error as the primary failure if it cannot be annotated.
+      }
+    }
+  }
+}
+
+export async function withCriticalPathMutation(
+  db,
+  { diagramId, actorId, actorRoles = [] },
+  mutate,
+) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const diagram = await client.query(
+      `SELECT id FROM project.diagrams WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+      [diagramId],
+    );
+    if (diagram.rowCount === 0) throw grpcError(status.NOT_FOUND, 'diagram_not_found');
+    const before = await loadCriticalPath(client, diagramId);
+    const result = await mutate(client);
+    const after = await loadCriticalPath(client, diagramId);
+    if (before?.calculationStatus !== 'cycle' && after?.calculationStatus === 'cycle') {
+      throw grpcError(status.FAILED_PRECONDITION, 'dependency_cycle');
+    }
+    const tracking = await queueCriticalPathChange(client, {
+      diagramId,
+      before,
+      after,
+      actorId,
+      actorRoles,
+    });
+    await client.query('COMMIT');
+    return { result, ...tracking };
+  } catch (error) {
+    await rollbackPreservingError(client, error);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function recalculateAutoTaskEnds(db, diagramId, dayMode = null) {
@@ -572,6 +732,7 @@ export function standaloneCsvToPayload(
   const resultKey = find(['Результат', 'result']);
   const descKey = find(['Описание', 'description']);
   const commentsKey = find(['Комментарии', 'comments']);
+  const estimatedHoursKey = find(['Оценка, ч', 'estimatedHours', 'estimated_hours']);
   const ownerKey = find(['Ответственный направления', 'Владелец', 'ownerId', 'owner_id']);
   const executorKey = find(['Исполнитель', 'execId', 'executor_id']);
   const coExecutorKey = find(['Соисполнитель', 'coId', 'co_executor_id']);
@@ -592,6 +753,10 @@ export function standaloneCsvToPayload(
       start: row[startKey],
       end: row[endKey],
       doneDate: row[doneKey],
+      estimatedHours:
+        row[estimatedHoursKey] === undefined || row[estimatedHoursKey] === ''
+          ? null
+          : Number(String(row[estimatedHoursKey]).replace(',', '.')),
       jira: row[jiraKey],
       hasBP: booleanValue(row[bpKey]),
       hasSP: booleanValue(row[spKey]),
@@ -711,6 +876,7 @@ export function normalizeStandaloneImport(
         startDate: item.start ?? null,
         endDate: item.end ?? null,
         actualEndDate: item.doneDate ?? item.actualEndDate ?? null,
+        estimatedHours: item.estimatedHours ?? item.estimated_hours ?? null,
         jiraNumber: item.jira ?? '',
         bpFlag: Boolean(item.hasBP ?? item.bp),
         spFlag: Boolean(item.hasSP ?? item.sp),
@@ -784,6 +950,7 @@ async function processDiagramImport(
     format: inputFormat,
     data,
     actorId,
+    actorRoles = [],
     memberNameMap = new Map(),
     activeProjectMemberIds = new Set(),
     dryRun = false,
@@ -802,6 +969,11 @@ async function processDiagramImport(
   };
   try {
     await client.query('BEGIN');
+    await client.query(
+      `SELECT id FROM project.diagrams WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+      [diagramId],
+    );
+    const beforeCriticalPath = await loadCriticalPath(client, diagramId);
     await client.query(
       `DELETE FROM plan.assignments
        WHERE (entity_type = 'task' AND entity_id IN (SELECT id FROM plan.tasks WHERE diagram_id = $1))
@@ -842,12 +1014,18 @@ async function processDiagramImport(
       return priorityValues.has(priority) ? priority : 'medium';
     };
     const insertTask = async (task, directionId, parentTaskId, index) => {
+      const hoursValue = task.estimatedHours ?? task.estimated_hours ?? null;
+      const parsedHours = hoursValue == null || hoursValue === '' ? null : Number(hoursValue);
+      if (parsedHours !== null && (!Number.isFinite(parsedHours) || parsedHours < 0)) {
+        throw new Error('invalid_estimated_hours');
+      }
+      const estimatedHours = parsedHours > 0 ? parsedHours : null;
       const result = await client.query(
         `INSERT INTO plan.tasks
            (diagram_id, direction_id, parent_task_id, level, wbs_code, sort_order, name,
             description, result, status, progress, priority, start_date, end_date,
-            actual_end_date, jira_number, bp_flag, sp_flag, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            actual_end_date, jira_number, bp_flag, sp_flag, created_by_user_id, estimated_hours)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
          RETURNING id`,
         [
           diagramId,
@@ -869,6 +1047,7 @@ async function processDiagramImport(
           Boolean(task.bpFlag ?? task.bp_flag),
           Boolean(task.spFlag ?? task.sp_flag),
           actorId,
+          estimatedHours,
         ],
       );
       return result.rows[0].id;
@@ -1147,11 +1326,17 @@ async function processDiagramImport(
     if (dryRun) {
       await client.query('ROLLBACK');
     } else {
+      await queueCriticalPathChange(client, {
+        diagramId,
+        before: beforeCriticalPath,
+        actorId,
+        actorRoles,
+      });
       await client.query('COMMIT');
     }
     return report;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await rollbackPreservingError(client, error);
     throw error;
   } finally {
     client.release();
@@ -1298,7 +1483,7 @@ export function createProjectImplementation({ db, userClient }) {
           project: toProject(result.rows[0], 'PROJECT_ROLE_OWNER'),
         });
       } catch (error) {
-        if (client) await client.query('ROLLBACK').catch(() => {});
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         client?.release();
@@ -1624,33 +1809,58 @@ export function createProjectImplementation({ db, userClient }) {
           return;
         }
         const row = current.rows[0];
-        await checkPermission(call_, userClient, row.project_id, 'diagram.update');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          row.project_id,
+          'diagram.update',
+        );
         const dayMode = call_.request.day_mode
           ? call_.request.day_mode === 'DAY_MODE_CALENDAR'
             ? 'calendar'
             : 'working'
           : row.day_mode;
-        const result = await db.query(
-          `UPDATE project.diagrams
-           SET name = COALESCE($2, name),
-               description = COALESCE($3, description),
-               day_mode = $4,
-               updated_by_user_id = $5,
-               updated_at = now()
-           WHERE id = $1
-           RETURNING *`,
-          [
-            diagramId,
-            call_.request.name ?? null,
-            call_.request.description ?? null,
-            dayMode,
-            actorUserId(call_),
-          ],
-        );
+        const update = async (connection) => {
+          const result = await connection.query(
+            `UPDATE project.diagrams
+             SET name = COALESCE($2, name),
+                 description = COALESCE($3, description),
+                 day_mode = $4,
+                 updated_by_user_id = $5,
+                 updated_at = now()
+             WHERE id = $1
+             RETURNING *`,
+            [
+              diagramId,
+              call_.request.name ?? null,
+              call_.request.description ?? null,
+              dayMode,
+              actorUserId(call_),
+            ],
+          );
+          if (dayMode !== row.day_mode) {
+            await recalculateAutoTaskEnds(connection, diagramId, dayMode);
+          }
+          return result.rows[0];
+        };
         if (dayMode !== row.day_mode) {
-          await recalculateAutoTaskEnds(db, diagramId, dayMode);
+          const write = await withCriticalPathMutation(
+            db,
+            {
+              diagramId,
+              actorId: actorUserId(call_),
+              actorRoles: actorRolesFromPermissionRole(actorRole),
+            },
+            update,
+          );
+          callback(null, {
+            diagram: toDiagram(write.result),
+            revision: String(write.revision ?? 0),
+          });
+          return;
         }
-        callback(null, { diagram: toDiagram(result.rows[0]) });
+        const updated = await update(db);
+        callback(null, { diagram: toDiagram(updated), revision: '0' });
       } catch (error) {
         callback(mapDbError(error));
       }
@@ -1835,10 +2045,20 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           current.rows[0].diagram_id,
         ]);
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.task.delete');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.task.delete',
+        );
 
         client = await db.connect();
         await client.query('BEGIN');
+        await client.query(
+          `SELECT id FROM project.diagrams WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [current.rows[0].diagram_id],
+        );
+        const beforeCriticalPath = await loadCriticalPath(client, current.rows[0].diagram_id);
         const tasks = await client.query(
           `SELECT id FROM plan.tasks WHERE direction_id = $1 AND deleted_at IS NULL`,
           [directionId],
@@ -1870,10 +2090,16 @@ export function createProjectImplementation({ db, userClient }) {
               OR (entity_type = 'task' AND entity_id = ANY($2::uuid[]))`,
           [directionId, taskIds],
         );
+        const pathChange = await queueCriticalPathChange(client, {
+          diagramId: current.rows[0].diagram_id,
+          before: beforeCriticalPath,
+          actorId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
+        });
         await client.query('COMMIT');
-        callback(null, { deleted: true, revision: '0' });
+        callback(null, { deleted: true, revision: String(pathChange.revision ?? 0) });
       } catch (error) {
-        if (client) await client.query('ROLLBACK');
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         if (client) client.release();
@@ -1963,7 +2189,7 @@ export function createProjectImplementation({ db, userClient }) {
           revision: '0',
         });
       } catch (error) {
-        if (client) await client.query('ROLLBACK');
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         if (client) client.release();
@@ -2031,7 +2257,7 @@ export function createProjectImplementation({ db, userClient }) {
           revision: '0',
         });
       } catch (error) {
-        if (client) await client.query('ROLLBACK');
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         if (client) client.release();
@@ -2079,11 +2305,7 @@ export function createProjectImplementation({ db, userClient }) {
         }
         const startDate = dateString(call_.request.start_date);
         let endDate = dateString(call_.request.end_date);
-        if (estimatedHours > 0) {
-          if (!startDate) {
-            callback(grpcError(status.INVALID_ARGUMENT, 'start_date_required_for_hours'));
-            return;
-          }
+        if (estimatedHours > 0 && startDate) {
           const holidays = await loadHolidayDates(db, diagramId);
           endDate = calculateAutoEndDate(
             startDate,
@@ -2121,47 +2343,58 @@ export function createProjectImplementation({ db, userClient }) {
             );
         const sortOrder = next.rows[0].next;
         const wbsBase = parentTask ? parentTask.wbs_code : direction.rows[0].wbs_code;
-        const result = await db.query(
-          `INSERT INTO plan.tasks
-             (diagram_id, direction_id, parent_task_id, level, wbs_code, sort_order,
-              name, description, result, priority, start_date, end_date, jira_number,
-              bp_flag, sp_flag, created_by_user_id, estimated_hours)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-           RETURNING *`,
-          [
+        const write = await withCriticalPathMutation(
+          db,
+          {
             diagramId,
-            directionId,
-            parentTaskId,
-            parentTaskId ? 3 : 2,
-            `${wbsBase}.${sortOrder}`,
-            sortOrder,
-            name,
-            String(call_.request.description ?? ''),
-            String(call_.request.result ?? ''),
-            fromPriority(call_.request.priority),
-            startDate,
-            endDate,
-            String(call_.request.jira_number ?? '') || null,
-            Boolean(call_.request.bp_flag),
-            Boolean(call_.request.sp_flag),
-            actorUserId(call_),
-            estimatedHours > 0 ? estimatedHours : null,
-          ],
+            actorId: actorUserId(call_),
+            actorRoles: actorRolesFromPermissionRole(actorRole),
+          },
+          async (client) => {
+            const result = await client.query(
+              `INSERT INTO plan.tasks
+                 (diagram_id, direction_id, parent_task_id, level, wbs_code, sort_order,
+                  name, description, result, priority, start_date, end_date, jira_number,
+                  bp_flag, sp_flag, created_by_user_id, estimated_hours)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+               RETURNING *`,
+              [
+                diagramId,
+                directionId,
+                parentTaskId,
+                parentTaskId ? 3 : 2,
+                `${wbsBase}.${sortOrder}`,
+                sortOrder,
+                name,
+                String(call_.request.description ?? ''),
+                String(call_.request.result ?? ''),
+                fromPriority(call_.request.priority),
+                startDate,
+                endDate,
+                String(call_.request.jira_number ?? '') || null,
+                Boolean(call_.request.bp_flag),
+                Boolean(call_.request.sp_flag),
+                actorUserId(call_),
+                estimatedHours > 0 ? estimatedHours : null,
+              ],
+            );
+            const task = result.rows[0];
+            await queueEvent(client, {
+              aggregateType: 'task',
+              aggregateId: task.id,
+              eventType: 'task.created',
+              actorUserId: actorUserId(call_),
+              actorRoles: actorRolesFromPermissionRole(actorRole),
+              projectId: diagram.rows[0].project_id,
+              diagramId,
+              entityType: 'task',
+              entityId: task.id,
+              payload: { task: toTask(task) },
+            });
+            return toTask(task);
+          },
         );
-        const task = result.rows[0];
-        await queueEvent(db, {
-          aggregateType: 'task',
-          aggregateId: task.id,
-          eventType: 'task.created',
-          actorUserId: actorUserId(call_),
-          actorRoles: actorRolesFromPermissionRole(actorRole),
-          projectId: diagram.rows[0].project_id,
-          diagramId,
-          entityType: 'task',
-          entityId: task.id,
-          payload: { task: toTask(task) },
-        });
-        callback(null, { task: toTask(task) });
+        callback(null, { task: write.result, revision: String(write.revision ?? 0) });
       } catch (error) {
         callback(mapDbError(error));
       }
@@ -2497,9 +2730,19 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.NOT_FOUND, 'diagram_not_found'));
           return;
         }
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'diagram.update');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'diagram.update',
+        );
         client = await db.connect();
         await client.query('BEGIN');
+        await client.query(
+          `SELECT id FROM project.diagrams WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [diagramId],
+        );
+        const beforeCriticalPath = await loadCriticalPath(client, diagramId);
         await client.query('DELETE FROM plan.diagram_holidays WHERE diagram_id = $1', [diagramId]);
         const saved = [];
         for (const item of items) {
@@ -2511,11 +2754,20 @@ export function createProjectImplementation({ db, userClient }) {
           );
           saved.push(result.rows[0]);
         }
+        await recalculateAutoTaskEnds(client, diagramId);
+        const pathChange = await queueCriticalPathChange(client, {
+          diagramId,
+          before: beforeCriticalPath,
+          actorId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
+        });
         await client.query('COMMIT');
-        await recalculateAutoTaskEnds(db, diagramId);
-        callback(null, { items: saved.map(toHoliday), revision: '0' });
+        callback(null, {
+          items: saved.map(toHoliday),
+          revision: String(pathChange.revision ?? 0),
+        });
       } catch (error) {
-        if (client) await client.query('ROLLBACK');
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         if (client) client.release();
@@ -2541,7 +2793,12 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.NOT_FOUND, 'diagram_not_found'));
           return;
         }
-        await checkPermission(call_, userClient, diagram.rows[0].project_id, 'project.import');
+        const actorRole = await checkPermission(
+          call_,
+          userClient,
+          diagram.rows[0].project_id,
+          'project.import',
+        );
         const actor = actorUserId(call_);
         const projectId = diagram.rows[0].project_id;
         const memberNameMap = new Map();
@@ -2611,6 +2868,7 @@ export function createProjectImplementation({ db, userClient }) {
             format,
             data,
             actorId: actor,
+            actorRoles: actorRolesFromPermissionRole(actorRole),
             memberNameMap,
             activeProjectMemberIds,
             dryRun: preview,
@@ -3016,11 +3274,7 @@ export function createProjectImplementation({ db, userClient }) {
         }
         let endDate = hasEnd ? dateString(call_.request.end_date) : dateOnly(current.end_date);
         const recalculateEnd = estimatedHours > 0 && (hasStart || hasEnd || hasHours);
-        if (recalculateEnd) {
-          if (!startDate) {
-            callback(grpcError(status.INVALID_ARGUMENT, 'start_date_required_for_hours'));
-            return;
-          }
+        if (recalculateEnd && startDate) {
           const holidays = await loadHolidayDates(db, current.diagram_id);
           endDate = calculateAutoEndDate(
             startDate,
@@ -3063,8 +3317,12 @@ export function createProjectImplementation({ db, userClient }) {
         if (hasEnd && !recalculateEnd) {
           add('end_date', endDate);
         }
-        if (recalculateEnd) {
+        if (recalculateEnd && startDate) {
           add('end_date', endDate);
+        } else if (recalculateEnd && hasEnd) {
+          add('end_date', endDate);
+        } else if (recalculateEnd && hasStart && !startDate) {
+          add('end_date', null);
         }
         if (hasField(call_.request, 'actual_end_date')) {
           add('actual_end_date', dateString(call_.request.actual_end_date));
@@ -3087,25 +3345,36 @@ export function createProjectImplementation({ db, userClient }) {
         sets.push(`updated_by_user_id = $${values.length}`);
         sets.push('version = version + 1', 'updated_at = now()');
 
-        const result = await db.query(
-          `UPDATE plan.tasks SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
-          values,
+        const write = await withCriticalPathMutation(
+          db,
+          {
+            diagramId: current.diagram_id,
+            actorId: actorUserId(call_),
+            actorRoles: actorRolesFromPermissionRole(actorRole),
+          },
+          async (client) => {
+            const result = await client.query(
+              `UPDATE plan.tasks SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+              values,
+            );
+            const assignments = await loadAssignments(client, userClient, 'task', taskId);
+            const updatedTask = toTask(result.rows[0], assignments);
+            await queueEvent(client, {
+              aggregateType: 'task',
+              aggregateId: taskId,
+              eventType: 'task.updated',
+              actorUserId: actorUserId(call_),
+              actorRoles: actorRolesFromPermissionRole(actorRole),
+              projectId: diagram.rows[0].project_id,
+              diagramId: result.rows[0].diagram_id,
+              entityType: 'task',
+              entityId: taskId,
+              payload: { task: updatedTask, changedFields: [] },
+            });
+            return updatedTask;
+          },
         );
-        const assignments = await loadAssignments(db, userClient, 'task', taskId);
-        const updatedTask = toTask(result.rows[0], assignments);
-        await queueEvent(db, {
-          aggregateType: 'task',
-          aggregateId: taskId,
-          eventType: 'task.updated',
-          actorUserId: actorUserId(call_),
-          actorRoles: actorRolesFromPermissionRole(actorRole),
-          projectId: diagram.rows[0].project_id,
-          diagramId: result.rows[0].diagram_id,
-          entityType: 'task',
-          entityId: taskId,
-          payload: { task: updatedTask, changedFields: [] },
-        });
-        callback(null, { task: updatedTask, revision: '0' });
+        callback(null, { task: write.result, revision: String(write.revision ?? 0) });
       } catch (error) {
         callback(mapDbError(error));
       }
@@ -3281,6 +3550,11 @@ export function createProjectImplementation({ db, userClient }) {
         client = await db.connect();
         await client.query('BEGIN');
         await client.query(
+          `SELECT id FROM project.diagrams WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [current.diagram_id],
+        );
+        const beforeCriticalPath = await loadCriticalPath(client, current.diagram_id);
+        await client.query(
           `UPDATE plan.tasks
            SET wbs_code = '~' || left(replace(id::text, '-', ''), 30)
            WHERE diagram_id = $1`,
@@ -3307,10 +3581,16 @@ export function createProjectImplementation({ db, userClient }) {
           );
         }
         const updated = await client.query(`SELECT * FROM plan.tasks WHERE id = $1`, [taskId]);
-        await client.query('COMMIT');
-        const assignments = await loadAssignments(db, userClient, 'task', taskId);
+        const assignments = await loadAssignments(client, userClient, 'task', taskId);
         const movedTask = toTask(updated.rows[0], assignments);
-        await queueEvent(db, {
+        const afterCriticalPath = await loadCriticalPath(client, current.diagram_id);
+        if (
+          beforeCriticalPath?.calculationStatus !== 'cycle' &&
+          afterCriticalPath?.calculationStatus === 'cycle'
+        ) {
+          throw grpcError(status.FAILED_PRECONDITION, 'dependency_cycle');
+        }
+        await queueEvent(client, {
           aggregateType: 'task',
           aggregateId: taskId,
           eventType: 'task.moved',
@@ -3322,9 +3602,17 @@ export function createProjectImplementation({ db, userClient }) {
           entityId: taskId,
           payload: { task: movedTask },
         });
-        callback(null, { task: movedTask, revision: '0' });
+        const pathChange = await queueCriticalPathChange(client, {
+          diagramId: current.diagram_id,
+          before: beforeCriticalPath,
+          after: afterCriticalPath,
+          actorId: actorUserId(call_),
+          actorRoles: actorRolesFromPermissionRole(actorRole),
+        });
+        await client.query('COMMIT');
+        callback(null, { task: movedTask, revision: String(pathChange.revision ?? 0) });
       } catch (error) {
-        if (client) await client.query('ROLLBACK');
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         if (client) client.release();
@@ -3496,7 +3784,7 @@ export function createProjectImplementation({ db, userClient }) {
         });
         callback(null, { task: updatedTask, revision: '0' });
       } catch (error) {
-        if (client) await client.query('ROLLBACK');
+        if (client) await rollbackPreservingError(client, error);
         callback(mapDbError(error));
       } finally {
         if (client) client.release();
@@ -3528,50 +3816,61 @@ export function createProjectImplementation({ db, userClient }) {
           diagram.rows[0].project_id,
           'project.task.delete',
         );
-        const deleted = await db.query(
-          `WITH RECURSIVE subtree AS (
-             SELECT id FROM plan.tasks WHERE id = $1 AND deleted_at IS NULL
-             UNION ALL
-             SELECT t.id FROM plan.tasks t
-             JOIN subtree s ON t.parent_task_id = s.id
-             WHERE t.deleted_at IS NULL
-           )
-           UPDATE plan.tasks
-           SET deleted_at = now(), updated_by_user_id = $2, updated_at = now()
-           WHERE id IN (SELECT id FROM subtree)
-           RETURNING id`,
-          [taskId, actorUserId(call_)],
+        const write = await withCriticalPathMutation(
+          db,
+          {
+            diagramId: task.rows[0].diagram_id,
+            actorId: actorUserId(call_),
+            actorRoles: actorRolesFromPermissionRole(actorRole),
+          },
+          async (client) => {
+            const deleted = await client.query(
+              `WITH RECURSIVE subtree AS (
+                 SELECT id FROM plan.tasks WHERE id = $1 AND deleted_at IS NULL
+                 UNION ALL
+                 SELECT t.id FROM plan.tasks t
+                 JOIN subtree s ON t.parent_task_id = s.id
+                 WHERE t.deleted_at IS NULL
+               )
+               UPDATE plan.tasks
+               SET deleted_at = now(), updated_by_user_id = $2, updated_at = now()
+               WHERE id IN (SELECT id FROM subtree)
+               RETURNING id`,
+              [taskId, actorUserId(call_)],
+            );
+            const deletedIds = deleted.rows.map((row) => row.id);
+            await client.query(
+              `DELETE FROM plan.dependencies
+               WHERE (predecessor_type = 'task' AND predecessor_id = ANY($1::uuid[]))
+                  OR (successor_type = 'task' AND successor_id = ANY($1::uuid[]))`,
+              [deletedIds],
+            );
+            await client.query(
+              `DELETE FROM plan.assignments
+               WHERE entity_type = 'task' AND entity_id = ANY($1::uuid[])`,
+              [deletedIds],
+            );
+            await client.query(
+              `DELETE FROM plan.comments
+               WHERE entity_type = 'task' AND entity_id = ANY($1::uuid[])`,
+              [deletedIds],
+            );
+            await queueEvent(client, {
+              aggregateType: 'task',
+              aggregateId: taskId,
+              eventType: 'task.deleted',
+              actorUserId: actorUserId(call_),
+              actorRoles: actorRolesFromPermissionRole(actorRole),
+              projectId: diagram.rows[0].project_id,
+              diagramId: task.rows[0].diagram_id,
+              entityType: 'task',
+              entityId: taskId,
+              payload: { taskId, diagramId: task.rows[0].diagram_id },
+            });
+            return true;
+          },
         );
-        const deletedIds = deleted.rows.map((row) => row.id);
-        await db.query(
-          `DELETE FROM plan.dependencies
-           WHERE (predecessor_type = 'task' AND predecessor_id = ANY($1::uuid[]))
-              OR (successor_type = 'task' AND successor_id = ANY($1::uuid[]))`,
-          [deletedIds],
-        );
-        await db.query(
-          `DELETE FROM plan.assignments
-           WHERE entity_type = 'task' AND entity_id = ANY($1::uuid[])`,
-          [deletedIds],
-        );
-        await db.query(
-          `DELETE FROM plan.comments
-           WHERE entity_type = 'task' AND entity_id = ANY($1::uuid[])`,
-          [deletedIds],
-        );
-        await queueEvent(db, {
-          aggregateType: 'task',
-          aggregateId: taskId,
-          eventType: 'task.deleted',
-          actorUserId: actorUserId(call_),
-          actorRoles: actorRolesFromPermissionRole(actorRole),
-          projectId: diagram.rows[0].project_id,
-          diagramId: task.rows[0].diagram_id,
-          entityType: 'task',
-          entityId: taskId,
-          payload: { taskId, diagramId: task.rows[0].diagram_id },
-        });
-        callback(null, { deleted: true, revision: '0' });
+        callback(null, { deleted: write.result, revision: String(write.revision ?? 0) });
       } catch (error) {
         callback(mapDbError(error));
       }
@@ -3604,7 +3903,7 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.NOT_FOUND, 'diagram_not_found'));
           return;
         }
-        await checkPermission(
+        const actorRole = await checkPermission(
           call_,
           userClient,
           diagram.rows[0].project_id,
@@ -3619,19 +3918,6 @@ export function createProjectImplementation({ db, userClient }) {
         }
         if (forbiddenDependencyDirection(predecessorType, successorType)) {
           callback(grpcError(status.INVALID_ARGUMENT, 'direction_to_task_dependency_forbidden'));
-          return;
-        }
-        if (
-          await createsDependencyCycle(
-            db,
-            diagramId,
-            predecessorType,
-            predecessorId,
-            successorType,
-            successorId,
-          )
-        ) {
-          callback(grpcError(status.FAILED_PRECONDITION, 'dependency_cycle'));
           return;
         }
         const color = String(call_.request.color ?? '');
@@ -3649,27 +3935,50 @@ export function createProjectImplementation({ db, userClient }) {
             DEPENDENCY_ARROW_SHAPE_STRAIGHT: 'straight',
             DEPENDENCY_ARROW_SHAPE_CURVED: 'curved',
           }[call_.request.arrow_shape] ?? 'orthogonal';
-        const result = await db.query(
-          `INSERT INTO plan.dependencies
-             (diagram_id, predecessor_type, predecessor_id, successor_type, successor_id,
-              color, line_style, arrow_shape, created_by_user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING *`,
-          [
+        const write = await withCriticalPathMutation(
+          db,
+          {
             diagramId,
-            predecessorType,
-            predecessorId,
-            successorType,
-            successorId,
-            color || null,
-            lineStyle,
-            arrowShape,
-            actorUserId(call_),
-          ],
+            actorId: actorUserId(call_),
+            actorRoles: actorRolesFromPermissionRole(actorRole),
+          },
+          async (client) => {
+            if (
+              await createsDependencyCycle(
+                client,
+                diagramId,
+                predecessorType,
+                predecessorId,
+                successorType,
+                successorId,
+              )
+            ) {
+              throw grpcError(status.FAILED_PRECONDITION, 'dependency_cycle');
+            }
+            const result = await client.query(
+              `INSERT INTO plan.dependencies
+                 (diagram_id, predecessor_type, predecessor_id, successor_type, successor_id,
+                  color, line_style, arrow_shape, created_by_user_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               RETURNING *`,
+              [
+                diagramId,
+                predecessorType,
+                predecessorId,
+                successorType,
+                successorId,
+                color || null,
+                lineStyle,
+                arrowShape,
+                actorUserId(call_),
+              ],
+            );
+            return toDependency(result.rows[0]);
+          },
         );
         callback(null, {
-          dependency: toDependency(result.rows[0]),
-          revision: '0',
+          dependency: write.result,
+          revision: String(write.revision ?? 0),
         });
       } catch (error) {
         if (error.code === '23505') {
@@ -3729,7 +4038,7 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           current.diagram_id,
         ]);
-        await checkPermission(
+        const actorRole = await checkPermission(
           call_,
           userClient,
           diagram.rows[0].project_id,
@@ -3769,21 +4078,6 @@ export function createProjectImplementation({ db, userClient }) {
           callback(grpcError(status.INVALID_ARGUMENT, 'direction_to_task_dependency_forbidden'));
           return;
         }
-        if (
-          await createsDependencyCycle(
-            db,
-            current.diagram_id,
-            predecessorType,
-            predecessorId,
-            successorType,
-            successorId,
-            dependencyId,
-          )
-        ) {
-          callback(grpcError(status.FAILED_PRECONDITION, 'dependency_cycle'));
-          return;
-        }
-
         const values = [dependencyId];
         const sets = [];
         const add = (column, value) => {
@@ -3833,11 +4127,38 @@ export function createProjectImplementation({ db, userClient }) {
           return;
         }
         sets.push('updated_at = now()');
-        const result = await db.query(
-          `UPDATE plan.dependencies SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
-          values,
+        const write = await withCriticalPathMutation(
+          db,
+          {
+            diagramId: current.diagram_id,
+            actorId: actorUserId(call_),
+            actorRoles: actorRolesFromPermissionRole(actorRole),
+          },
+          async (client) => {
+            if (
+              await createsDependencyCycle(
+                client,
+                current.diagram_id,
+                predecessorType,
+                predecessorId,
+                successorType,
+                successorId,
+                dependencyId,
+              )
+            ) {
+              throw grpcError(status.FAILED_PRECONDITION, 'dependency_cycle');
+            }
+            const result = await client.query(
+              `UPDATE plan.dependencies SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+              values,
+            );
+            return toDependency(result.rows[0]);
+          },
         );
-        callback(null, { dependency: toDependency(result.rows[0]), revision: '0' });
+        callback(null, {
+          dependency: write.result,
+          revision: String(write.revision ?? 0),
+        });
       } catch (error) {
         callback(mapDbError(error));
       }
@@ -3856,14 +4177,25 @@ export function createProjectImplementation({ db, userClient }) {
         const diagram = await db.query(`SELECT project_id FROM project.diagrams WHERE id = $1`, [
           dependency.rows[0].diagram_id,
         ]);
-        await checkPermission(
+        const actorRole = await checkPermission(
           call_,
           userClient,
           diagram.rows[0].project_id,
           'project.dependency.manage',
         );
-        await db.query('DELETE FROM plan.dependencies WHERE id = $1', [dependencyId]);
-        callback(null, { deleted: true, revision: '0' });
+        const write = await withCriticalPathMutation(
+          db,
+          {
+            diagramId: dependency.rows[0].diagram_id,
+            actorId: actorUserId(call_),
+            actorRoles: actorRolesFromPermissionRole(actorRole),
+          },
+          async (client) => {
+            await client.query('DELETE FROM plan.dependencies WHERE id = $1', [dependencyId]);
+            return true;
+          },
+        );
+        callback(null, { deleted: write.result, revision: String(write.revision ?? 0) });
       } catch (error) {
         callback(mapDbError(error));
       }

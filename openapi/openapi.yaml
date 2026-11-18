@@ -2969,6 +2969,13 @@ components:
             - number
             - 'null'
           minimum: 0
+        float:
+          type:
+            - integer
+            - 'null'
+          description: Total float in the diagram's selected day mode.
+        isCritical:
+          type: boolean
         createdByUserId:
           type: string
           format: uuid
@@ -3013,6 +3020,8 @@ components:
             - orthogonal
             - straight
             - curved
+        isCritical:
+          type: boolean
         createdAt:
           type: string
           format: date-time
@@ -3089,6 +3098,7 @@ components:
         - comments
         - holidays
         - currentRevision
+        - schedule
       properties:
         diagram:
           $ref: '#/components/schemas/Diagram'
@@ -3117,6 +3127,117 @@ components:
           format: int64
         namesResolved:
           type: boolean
+        schedule:
+          $ref: '#/components/schemas/DiagramSchedule'
+    DiagramSchedule:
+      type: object
+      required:
+        - mode
+        - criticalPathDurationDays
+        - criticalTaskIds
+        - criticalDependencyIds
+        - calculationStatus
+        - unknownDurationTaskIds
+        - invalidDependencyIds
+        - issues
+        - cycles
+      properties:
+        mode:
+          type: string
+          enum:
+            - calendar
+            - working
+        projectStart:
+          type:
+            - string
+            - 'null'
+          format: date
+        projectEnd:
+          type:
+            - string
+            - 'null'
+          format: date
+        durationDays:
+          type: integer
+          minimum: 0
+        overallProgress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        criticalPathDurationDays:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        criticalTaskIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        criticalDependencyIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        calculationStatus:
+          type: string
+          enum:
+            - complete
+            - incomplete
+            - cycle
+            - invalid
+        unknownDurationTaskIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        invalidDependencyIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriticalPathIssue'
+        cycles:
+          type: array
+          items:
+            type: string
+        counts:
+          type: object
+          properties:
+            total:
+              type: integer
+            done:
+              type: integer
+            inProgress:
+              type: integer
+            blocked:
+              type: integer
+            postponed:
+              type: integer
+            planned:
+              type: integer
+            early:
+              type: integer
+            overdue:
+              type: integer
+    CriticalPathIssue:
+      type: object
+      properties:
+        code:
+          type: string
+        taskIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        dependencyIds:
+          type: array
+          items:
+            type: string
+            format: uuid
     ImportIssue:
       type: object
       properties:
@@ -4114,6 +4235,13 @@ components:
         endDate:
           type: string
           format: date-time
+        float:
+          type:
+            - integer
+            - 'null'
+          description: Minimum descendant task float in the selected day mode.
+        isCritical:
+          type: boolean
         jiraNumber:
           type: string
         bpFlag:

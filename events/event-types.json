@@ -403,7 +403,7 @@
         "audit"
       ],
       "payloadSchema": "payloads.schema.json#/$defs/DiagramCriticalPathChangedPayload",
-      "status": "planned"
+      "status": "implemented"
     },
     {
       "type": "comment.created",

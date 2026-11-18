@@ -66,7 +66,17 @@ test('imports standalone HTML JSON format', async ({ page }) => {
           percentComplete: 100,
           start: '2026-01-05',
           end: '2026-01-06',
-          dependencies: '1.1',
+        },
+        {
+          id: '1.2',
+          level: 2,
+          parentId: '1',
+          type: 'Задача',
+          task: 'Standalone successor',
+          start: '2026-01-07',
+          end: '2026-01-08',
+          estimatedHours: 16,
+          dependencies: '1.1.1',
         },
       ],
     };
@@ -109,24 +119,44 @@ test('imports standalone HTML JSON format', async ({ page }) => {
     const exported = await fetch(
       `/api/v1/diagrams/${diagram.id}/export?format=json&compat=standalone`,
     ).then((item) => item.json());
-    return { job, previewJob, before, snapshot, exported, diagramId: diagram.id };
+    const csv = await fetch(
+      `/api/v1/diagrams/${diagram.id}/export?format=csv&compat=standalone`,
+    ).then((item) => item.text());
+    return {
+      job,
+      previewJob,
+      before,
+      snapshot,
+      exported,
+      csv,
+      projectId: project.id,
+      diagramId: diagram.id,
+    };
   });
 
+  await page.goto(`/gantt?project=${result.projectId}&diagram=${result.diagramId}`);
+  await expect(page.locator('.gantt-toolbar .critical-path-legend')).toBeVisible();
+  await expect(page.locator('.gantt-topline')).toContainText('критический путь');
+  await expect(page.locator('.gantt-bar.critical:not(.direction-bar)').first()).toBeVisible();
+
   expect(result.previewJob.status).toBe('cancelled');
-  expect(result.previewJob.report.tasksCount).toBe(2);
+  expect(result.previewJob.report.tasksCount).toBe(3);
   expect(result.before.tasks).toHaveLength(0);
   expect(result.job.status).toBe('completed');
   expect(result.snapshot.diagram.name).toBe('Standalone import');
   expect(result.snapshot.directions).toHaveLength(1);
-  expect(result.snapshot.tasks).toHaveLength(2);
+  expect(result.snapshot.tasks).toHaveLength(3);
   expect(result.snapshot.tasks.find((task) => task.wbsCode === '1.1').progress).toBe(100);
   expect(result.snapshot.tasks.find((task) => task.wbsCode === '1.1').autoProgress).toBe(true);
   expect(result.snapshot.tasks.find((task) => task.wbsCode === '1.1.1').parentTaskId).toBeTruthy();
   expect(result.snapshot.dependencies).toHaveLength(1);
   expect(result.snapshot.schedule.criticalTaskIds.length).toBeGreaterThan(0);
-  expect(result.exported.tasks).toHaveLength(3);
+  expect(result.exported.tasks).toHaveLength(4);
   expect(result.exported.tasks.find((task) => task.level === 2)).not.toHaveProperty('ownerId');
   expect(result.exported.tasks.find((task) => task.level === 1)).toHaveProperty('ownerId');
   expect(result.exported.directionOrder).toEqual(['1']);
   expect(Object.keys(result.exported.depStyles).length).toBe(1);
+  const csvTask = result.csv.split(/\r?\n/).find((line) => line.startsWith('"1.2";'));
+  expect(csvTask).toBeTruthy();
+  expect(csvTask.slice(1, -1).split('";"').slice(10, 14)).toEqual(['2', '', '16', 'да']);
 });

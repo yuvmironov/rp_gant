@@ -196,13 +196,13 @@ test('nuxt gantt page renders tasks and edit modal', async ({ page }) => {
   await page.locator('.dependency-modal button').filter({ hasText: 'Сохранить' }).click();
   await expect(page.locator('.dependency-modal')).toHaveCount(0);
   await expect(page.locator('.dep-line').first()).toHaveAttribute('stroke-dasharray', '6 4');
-  const orthogonalPath = await page.locator('.dep-line').first().getAttribute('d');
+  await expect(page.locator('.dep-line').first()).toHaveAttribute('data-route-mode', 'orthogonal');
   await page.locator('.dep-hit').first().dispatchEvent('click');
   await page.locator('.dependency-arrow-shape').selectOption('straight');
   await page.locator('.dependency-modal button').filter({ hasText: 'Сохранить' }).click();
   await expect(page.locator('.dependency-modal')).toHaveCount(0);
+  await expect(page.locator('.dep-line').first()).toHaveAttribute('data-route-mode', 'straight');
   const straightPath = await page.locator('.dep-line').first().getAttribute('d');
-  expect(straightPath).not.toBe(orthogonalPath);
   expect((straightPath.match(/L/g) ?? []).length).toBe(1);
   await page.locator('.dep-hit').first().dispatchEvent('mouseenter');
   await expect(page.locator('.gantt-bar.dep-linked')).toHaveCount(2);
